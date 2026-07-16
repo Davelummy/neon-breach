@@ -5,6 +5,7 @@ export const campaignRecords = sqliteTable("campaign_records", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userEmail: text("user_email").notNull(),
   status: text("status").notNull().default("active"),
+  operation: integer("operation").notNull().default(0),
   difficulty: text("difficulty").notNull().default("operative"),
   timeOfDay: text("time_of_day").notNull().default("day"),
   wave: integer("wave").notNull().default(1),

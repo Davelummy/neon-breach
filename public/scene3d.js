@@ -173,18 +173,21 @@ function createHuman(type = 'specter', variant = 0, elite = false, commander = f
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
+  // Palettes are keyed by body silhouette; the archetype's spec supplies the
+  // accent color, so new ENEMY_TYPES entries render without touching this file.
+  const spec = bridge.world.enemyTypes?.[type] || {};
+  const body3d = spec.body || { wraith: 'scout', specter: 'trooper', titan: 'heavy' }[type] || 'trooper';
   const colors = {
-    wraith: [0x21383a, 0x2b4038, 0x253242],
-    specter: [0x332b4a, 0x293143, 0x422e41],
-    titan: [0x44312f, 0x373c42, 0x4b3431]
+    scout: [0x21383a, 0x2b4038, 0x253242],
+    trooper: [0x332b4a, 0x293143, 0x422e41],
+    heavy: [0x44312f, 0x373c42, 0x4b3431]
   };
-  const accents = { wraith: 0x31f5db, specter: 0xa66cff, titan: 0xff8c57 };
   const skins = [0x7b4935, 0xb87855, 0xd6a17a];
-  const uniform = mat(colors[type][variant % 3], .74, .25);
+  const uniform = mat(colors[body3d][variant % 3], .74, .25);
   const armor = mat(0x11191d, .42, .68);
   const skin = mat(skins[variant % 3], .8, .02);
-  const accentColor=commander?0xffd166:accents[type],accent = new THREE.MeshStandardMaterial({ color:accentColor, emissive:accentColor, emissiveIntensity: elite ? 2.4 : .8, roughness: .38, metalness: .55 });
-  const scale = type === 'titan' ? 1.17 : type === 'wraith' ? .94 : 1;
+  const accentColor=commander?0xffd166:spec.color?new THREE.Color(spec.color).getHex():0x31f5db,accent = new THREE.MeshStandardMaterial({ color:accentColor, emissive:accentColor, emissiveIntensity: elite ? 2.4 : .8, roughness: .38, metalness: .55 });
+  const scale = body3d === 'heavy' ? 1.17 : body3d === 'scout' ? .94 : 1;
 
   const pelvis = mesh(new THREE.BoxGeometry(.37, .22, .24), armor);
   pelvis.position.y = .8;
@@ -438,7 +441,7 @@ function syncProjectiles(frame) {
   for (const projectile of frame.projectiles) {
     let object = projectileMeshes.get(projectile);
     if (!object) {
-      const color = projectile.type === 'titan' ? 0xffbb55 : 0xff294d;
+      const color = { titan: 0xffbb55, warden: 0x74c2ff, raven: 0xffd257 }[projectile.type] ?? 0xff294d;
       object = mesh(new THREE.SphereGeometry(.055, 7, 5), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 6 }), false, false);
       projectileMeshes.set(projectile, object); effectsRoot.add(object); rendered.projectiles.add(object);
     }
@@ -542,15 +545,87 @@ function animate() {
   syncParticles(frame);
   const target=frame.objectiveTarget||[12,12],markerBase=(frame.missionStage===1||frame.missionStage===2) ? .88 : .08;objectiveMarker.visible=frame.mode==='playing'&&frame.wavePhase!=='complete';objectiveMarker.position.set(target[0],markerBase+Math.sin(frame.totalTime*3.2)*.045,target[1]);objectiveMarker.rotation.y=frame.totalTime*1.3;markerRing.scale.setScalar(1+Math.sin(frame.totalTime*4)*.12);markerDiamond.rotation.y=frame.totalTime*2.2;
   terminalScreen.material.emissiveIntensity=2.4+Math.sin(frame.totalTime*4)*.8;extractionPad.visible=frame.missionStage>=4;extractionPad.rotation.y=frame.totalTime*.18;extractionBeam.material.opacity=.065+Math.sin(frame.totalTime*2.4)*.025;
-  renderer.render(scene, camera);
+  renderFrame();
+  tuneQuality();
 }
 
-addEventListener('resize', () => {
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, coarse ? 1.15 : 1.65));
+// ---- Adaptive quality + post-processing -----------------------------------
+// Hand-rolled bloom + vignette (no external passes — the deploy bundle only
+// vendors three.module.min.js). An EMA of frame time steps quality up/down:
+//   L0 .78x pixels, no post   L1 1x, no post
+//   L2 1.3x, bloom            L3 1.65x, bloom (desktop default)
+const QUALITY_PIXEL = [.78, 1, 1.3, 1.65];
+const fx = { quality: coarse ? 1 : 2, maxQuality: coarse ? 2 : 3, ema: 16, lastTime: performance.now(), lastStep: performance.now() };
+const postQuad = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const fullscreen = new THREE.PlaneGeometry(2, 2);
+let sceneTarget = null, bloomA = null, bloomB = null;
+const brightMat = new THREE.ShaderMaterial({ uniforms: { tex: { value: null } }, depthTest: false, depthWrite: false,
+  vertexShader: 'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',
+  fragmentShader: 'uniform sampler2D tex;varying vec2 vUv;void main(){vec3 c=texture2D(tex,vUv).rgb;float l=dot(c,vec3(.299,.587,.114));gl_FragColor=vec4(c*smoothstep(.58,.95,l),1.);}' });
+const blurMat = new THREE.ShaderMaterial({ uniforms: { tex: { value: null }, dir: { value: new THREE.Vector2(1, 0) }, texel: { value: new THREE.Vector2(1, 1) } }, depthTest: false, depthWrite: false,
+  vertexShader: 'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',
+  fragmentShader: 'uniform sampler2D tex;uniform vec2 dir,texel;varying vec2 vUv;void main(){vec2 o=dir*texel;vec3 s=texture2D(tex,vUv).rgb*.227;s+=(texture2D(tex,vUv+o*1.38).rgb+texture2D(tex,vUv-o*1.38).rgb)*.316;s+=(texture2D(tex,vUv+o*3.23).rgb+texture2D(tex,vUv-o*3.23).rgb)*.07;gl_FragColor=vec4(s,1.);}' });
+const compositeMat = new THREE.ShaderMaterial({ uniforms: { tScene: { value: null }, tBloom: { value: null }, strength: { value: .85 } }, depthTest: false, depthWrite: false,
+  vertexShader: 'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',
+  fragmentShader: 'uniform sampler2D tScene,tBloom;uniform float strength;varying vec2 vUv;void main(){vec3 col=texture2D(tScene,vUv).rgb+texture2D(tBloom,vUv).rgb*strength;float d=distance(vUv,vec2(.5));col*=1.-smoothstep(.52,.92,d)*.32;gl_FragColor=vec4(col,1.);\n#include <colorspace_fragment>\n}' });
+const postScene = new THREE.Scene();
+const postMesh = new THREE.Mesh(fullscreen, compositeMat);
+postMesh.frustumCulled = false;
+postScene.add(postMesh);
+
+function buildTargets() {
+  const w = Math.max(2, Math.floor(innerWidth * renderer.getPixelRatio())), h = Math.max(2, Math.floor(innerHeight * renderer.getPixelRatio()));
+  sceneTarget?.dispose(); bloomA?.dispose(); bloomB?.dispose();
+  sceneTarget = new THREE.WebGLRenderTarget(w, h, { samples: coarse ? 0 : 2 });
+  bloomA = new THREE.WebGLRenderTarget(w >> 2, h >> 2);
+  bloomB = new THREE.WebGLRenderTarget(w >> 2, h >> 2);
+  blurMat.uniforms.texel.value.set(1 / Math.max(1, w >> 2), 1 / Math.max(1, h >> 2));
+}
+
+function postPass(material, target) {
+  postMesh.material = material;
+  renderer.setRenderTarget(target);
+  renderer.render(postScene, postQuad);
+}
+
+function renderFrame() {
+  if (fx.quality < 2) { renderer.render(scene, camera); return; }
+  if (!sceneTarget) buildTargets();
+  renderer.setRenderTarget(sceneTarget);
+  renderer.render(scene, camera);
+  brightMat.uniforms.tex.value = sceneTarget.texture; postPass(brightMat, bloomA);
+  blurMat.uniforms.tex.value = bloomA.texture; blurMat.uniforms.dir.value.set(1, 0); postPass(blurMat, bloomB);
+  blurMat.uniforms.tex.value = bloomB.texture; blurMat.uniforms.dir.value.set(0, 1); postPass(blurMat, bloomA);
+  compositeMat.uniforms.tScene.value = sceneTarget.texture; compositeMat.uniforms.tBloom.value = bloomA.texture;
+  postMesh.material = compositeMat;
+  renderer.setRenderTarget(null);
+  renderer.render(postScene, postQuad);
+}
+
+function applyQuality() {
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, QUALITY_PIXEL[fx.quality]));
   renderer.setSize(innerWidth, innerHeight, false);
+  if (fx.quality >= 2) buildTargets();
+}
+
+function tuneQuality() {
+  const now = performance.now(), dt = Math.min(200, now - fx.lastTime); fx.lastTime = now;
+  fx.ema += (dt - fx.ema) * .05;
+  if (fx.forced != null || now - fx.lastStep < 2500) return;
+  if (fx.ema > 24 && fx.quality > 0) { fx.quality--; fx.lastStep = now; applyQuality(); }
+  else if (fx.ema < 13 && fx.quality < fx.maxQuality) { fx.quality++; fx.lastStep = now; applyQuality(); }
+}
+
+window.__NEON_FX__ = { quality: () => fx.quality, frameMs: () => fx.ema, post: () => fx.quality >= 2,
+  // Test/dev hook: pin a quality level (pass null to resume auto-scaling).
+  force: level => { fx.forced = level === null ? null : Math.max(0, Math.min(3, level | 0)); if (fx.forced !== null) { fx.quality = fx.forced; applyQuality(); } } };
+
+addEventListener('resize', () => {
+  applyQuality();
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
 });
 
+applyQuality();
 renderer.setAnimationLoop(animate);
 bridge.ready();

@@ -1,0 +1,1 @@
+ALTER TABLE `campaign_records` ADD `operation` integer DEFAULT 0 NOT NULL;

@@ -1,18 +1,42 @@
 # NEON BREACH
 
-A playable 3D browser FPS vertical slice with story objectives, human-shaped enemies, weapons, vehicles, controller support, campaign progress, and adaptive audio.
+A playable 3D browser FPS with a three-operation campaign, six enemy archetypes with tactical squad AI, multi-phase boss fights, weapon and perk progression, vehicles, controller support, cloud campaign saves, a global leaderboard, and adaptive audio.
 
 ## Play
 
-**[Launch NEON BREACH — First Strike Build 4.0](https://neon-breach-ares-07.davelummy.chatgpt.site)**
+**[Launch NEON BREACH — Build 4.1](https://neon-breach-ares-07.davelummy.chatgpt.site)**
 
-## First Strike mission
+## Campaign operations
 
-1. Infiltrate the district
-2. Breach the data center
-3. Defend the uplink
-4. Eliminate Commander Voss
-5. Enter an interceptor and extract
+Pick an operation from the mission command panel. Each runs five phases and ends in a vehicle extraction.
+
+1. **FIRST STRIKE** — Infiltrate the district, breach the data center, defend the uplink, eliminate Commander Voss, extract north.
+2. **NIGHT RAPTOR** — Cross the plaza after dark, climb the comm tower, hold it while the scrambler cycles, silence Raptor Actual, run the southern corridor.
+3. **IRON HARVEST** — Push to the northern depot, drain the foundry core under siege, reach the vault, destroy the command titan Warden-6, burn for the northeast beacon.
+
+Every commander is a multi-phase boss: wounding it past each threshold triggers reinforcements and rage escalations.
+
+## Enemies
+
+| Archetype | Role |
+|---|---|
+| WRAITH | Fast flanker with combat dashes |
+| SPECTER | Mid-range support, wide strafes |
+| TITAN | Heavy assault, charges when it sees you |
+| STALKER | Rusher — closes distance and mauls in melee |
+| RAVEN | Sniper — precise, deadly, keeps its range |
+| WARDEN | Shielded — frontal kinetic barrier; flank it or use the finisher |
+
+## Progression
+
+Career stats accumulate across all cloud-saved runs and unlock:
+
+- **NX-7 ARC MARKSMAN** rifle — 50 career eliminations
+- **REINFORCED PLATING** (+20 max armor) — win any operation
+- **AEGIS CAPACITOR** (+15 max shield) — 8 career finishers
+- **EXTENDED MAGAZINES** (+35% reserve ammo) — 120 career eliminations
+
+A global leaderboard ranks operatives by best score (emails are masked).
 
 ## Controls
 
@@ -38,7 +62,7 @@ A playable 3D browser FPS vertical slice with story objectives, human-shaped ene
 - Q: Sprint
 - Space: Jump / jet assist
 - R: Reload
-- 1–3 or mouse wheel: Change weapon
+- 1–4 or mouse wheel: Change weapon
 - E: Enter or exit vehicle
 - F: Close-range finisher
 - T: Toggle auto-lock
@@ -60,16 +84,25 @@ npm run build
 npm start
 ```
 
+## Testing
+
+```bash
+npm test    # node:test suite — mission/enemy data invariants, save validation, path safety
+npm run qa  # headless gameplay smoke test (chrome-headless-shell): boots the game,
+            # plays operations end to end, triggers boss phases, checks the 3D renderer
+```
+
 ## Technology
 
-- JavaScript and WebGL
-- Three.js
+- JavaScript and WebGL (ES modules, no bundler)
+- Three.js with a hand-rolled bloom/vignette post pipeline and adaptive quality scaling (auto-tunes pixel ratio and effects to the device's frame budget)
+- Data-driven missions, enemy archetypes, and progression (`public/data.js`)
 - Procedural 3D characters, weapons, vehicles, buildings, and effects
 - Web Audio API
 - Gamepad API with PS5 mapping
-- Progressive Web App support
-- Drizzle-compatible campaign persistence for hosted deployments
+- Progressive Web App support (offline-capable)
+- D1/Drizzle campaign persistence with server-side score plausibility validation
 
 ## Status
 
-Friends-and-family vertical slice. The game is playable and shareable, but it is not presented as a finished AAA commercial release.
+Friends-and-family release. The game is playable and shareable, but it is not presented as a finished AAA commercial release.
