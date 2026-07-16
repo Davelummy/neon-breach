@@ -1,0 +1,1 @@
+CREATE INDEX `campaign_user_updated_idx` ON `campaign_records` (`user_email`,`updated_at`);

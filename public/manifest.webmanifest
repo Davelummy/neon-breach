@@ -1,0 +1,19 @@
+{
+  "name": "Neon Breach — Web FPS",
+  "short_name": "Neon Breach",
+  "description": "A polished true-3D tactical FPS vertical slice: infiltrate, breach a data center, defend an uplink, eliminate Commander Voss, and extract by vehicle with adaptive music and PS5 DualSense controls.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#020307",
+  "theme_color": "#05070c",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

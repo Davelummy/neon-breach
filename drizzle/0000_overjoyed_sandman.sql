@@ -1,0 +1,21 @@
+CREATE TABLE `campaign_records` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`user_email` text NOT NULL,
+	`status` text DEFAULT 'active' NOT NULL,
+	`difficulty` text DEFAULT 'operative' NOT NULL,
+	`time_of_day` text DEFAULT 'day' NOT NULL,
+	`wave` integer DEFAULT 1 NOT NULL,
+	`score` integer DEFAULT 0 NOT NULL,
+	`kills` integer DEFAULT 0 NOT NULL,
+	`shots` integer DEFAULT 0 NOT NULL,
+	`hits` integer DEFAULT 0 NOT NULL,
+	`takedowns` integer DEFAULT 0 NOT NULL,
+	`roadkills` integer DEFAULT 0 NOT NULL,
+	`health` integer DEFAULT 100 NOT NULL,
+	`shield` integer DEFAULT 50 NOT NULL,
+	`armor` integer DEFAULT 100 NOT NULL,
+	`weapon_index` integer DEFAULT 0 NOT NULL,
+	`elapsed_seconds` integer DEFAULT 0 NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
