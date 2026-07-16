@@ -8,6 +8,7 @@
     "build": "node scripts/build.mjs",
     "test": "node --test tests/*.test.mjs",
     "qa": "node scripts/qa-smoke.mjs",
+    "blender:check": "node scripts/blender/run-healthcheck.mjs",
     "mcp:check": "node scripts/check-mcp-prereqs.mjs",
     "start": "node scripts/serve.mjs",
     "db:generate": "drizzle-kit generate"
