@@ -12,6 +12,8 @@ import { AudioSystem } from '/audio.js';
     const radar = $('radar');
     const rctx = radar.getContext('2d');
     const coarsePointer = matchMedia('(pointer: coarse)').matches;
+    const compatibilityMode = new URLSearchParams(location.search).get('renderer') === 'compat';
+    const lowRenderPreset = compatibilityMode || new URLSearchParams(location.search).get('quality') === 'low' || (()=>{try{return localStorage.getItem('neon-breach-quality')==='low';}catch{return false;}})();
     const TAU = Math.PI * 2;
     const FOV = Math.PI / 3;
 
@@ -32,6 +34,8 @@ import { AudioSystem } from '/audio.js';
       hurtTimer: 0, alive: true, shots: 0, hits: 0, grounded: true, jetFuel: 100, jetting: false, ads: 0, stepTimer: 0, jetSoundTimer: 0,
       weaponIndex:0,weaponSlots:[],carIndex:-1,gamepadAimValue:0,moveVx:0,moveVy:0
     };
+    const renderCamera = { x: 0, y: 0, z: 0, dir: 0, pitch: 0 };
+    const threeFrame = {};
 
     const input = { forward:false, back:false, left:false, right:false, sprint:false, fire:false, shiftFire:false, pointerFire:false, aim:false, jump:false,gamepadFire:false,gamepadAim:false,gamepadAimValue:0,gamepadJump:false,gamepadSprint:false };
     let moveAxis = {x:0,y:0};
@@ -45,7 +49,25 @@ import { AudioSystem } from '/audio.js';
     let sprites = {};
     let resizeTimer = 0;
     let audio = null;
-    const campaignCloud = { id:null, active:null, records:[], syncing:false, saveTimer:12, remoteBest:0, pendingStatus:null };
+    const campaignCloud = { id:null, active:null, records:[], syncing:false, saveTimer:12, remoteBest:0, pendingStatus:null, offline:false };
+    const LOCAL_CAMPAIGN_KEY = 'neon-breach-campaign-v1';
+    function localCampaignState(){try{const value=JSON.parse(localStorage.getItem(LOCAL_CAMPAIGN_KEY)||'null');return value&&typeof value==='object'?value:null;}catch{return null;}}
+    function writeLocalCampaign(status,payload){
+      const local=localCampaignState()||{active:null,records:[],career:{kills:0,takedowns:0,roadkills:0,victories:0},best_score:0};
+      const record={...payload,id:Number(payload.id||Date.now()),updated_at:new Date().toISOString()};
+      if(status==='active')local.active=record;
+      else{local.active=null;local.records=[record,...(Array.isArray(local.records)?local.records:[])].slice(0,8);}
+      local.best_score=Math.max(Number(local.best_score||0),Number(record.score||0));
+      local.career={kills:local.records.reduce((sum,row)=>sum+Number(row.kills||0),0),takedowns:local.records.reduce((sum,row)=>sum+Number(row.takedowns||0),0),roadkills:local.records.reduce((sum,row)=>sum+Number(row.roadkills||0),0),victories:local.records.reduce((sum,row)=>sum+(row.status==='victory'?1:0),0)};
+      try{localStorage.setItem(LOCAL_CAMPAIGN_KEY,JSON.stringify(local));}catch{}
+      return record;
+    }
+    function useLocalCampaign(){
+      const local=localCampaignState();if(!local)return false;
+      campaignCloud.active=local.active||null;campaignCloud.records=Array.isArray(local.records)?local.records:[];campaignCloud.remoteBest=Number(local.best_score||0);campaignCloud.offline=true;
+      if(local.career)for(const key of Object.keys(career))career[key]=Number(local.career[key]||0);
+      renderCampaignRecords();renderArsenal();return true;
+    }
     // Career totals across all campaign records (served by GET /api/campaigns);
     // unlocks for weapons and perks are evaluated against these.
     const career = { kills:0, takedowns:0, roadkills:0, victories:0 };
@@ -195,7 +217,7 @@ import { AudioSystem } from '/audio.js';
     }
 
     function resize() {
-      const maxW=coarsePointer?820:1080, scale=coarsePointer?.9:.82;
+      const maxW=coarsePointer?820:(lowRenderPreset?640:1080), scale=coarsePointer?.9:(lowRenderPreset?.52:.82);
       canvas.width=Math.max(480,Math.min(maxW,Math.round(innerWidth*scale)));
       canvas.height=Math.max(270,Math.round(canvas.width*(innerHeight/innerWidth)));
       depthBuffer=new Float32Array(canvas.width);
@@ -688,8 +710,10 @@ import { AudioSystem } from '/audio.js';
     }
 
     function getRenderCamera(){
-      if(player.carIndex<0)return{x:player.x,y:player.y,z:player.z,dir:player.dir,pitch:player.pitch};const car=state.cars[player.carIndex];let distance=2.05,cx=car.x-Math.cos(car.dir)*distance,cy=car.y-Math.sin(car.dir)*distance;
-      while(distance>.62&&blocksAt(cx,cy,.94)){distance-=.18;cx=car.x-Math.cos(car.dir)*distance;cy=car.y-Math.sin(car.dir)*distance;}return{x:cx,y:cy,z:.96,dir:car.dir,pitch:player.pitch*.28-24};
+      if(player.carIndex<0){renderCamera.x=player.x;renderCamera.y=player.y;renderCamera.z=player.z;renderCamera.dir=player.dir;renderCamera.pitch=player.pitch;return renderCamera;}
+      const car=state.cars[player.carIndex];let distance=2.05,cx=car.x-Math.cos(car.dir)*distance,cy=car.y-Math.sin(car.dir)*distance;
+      while(distance>.62&&blocksAt(cx,cy,.94)){distance-=.18;cx=car.x-Math.cos(car.dir)*distance;cy=car.y-Math.sin(car.dir)*distance;}
+      renderCamera.x=cx;renderCamera.y=cy;renderCamera.z=.96;renderCamera.dir=car.dir;renderCamera.pitch=player.pitch*.28-24;return renderCamera;
     }
 
     function viewFov(){return player.carIndex>=0?FOV*1.16:FOV*(1-player.ads*weaponConfig().zoom);}
@@ -706,7 +730,16 @@ import { AudioSystem } from '/audio.js';
       const haze=ctx.createLinearGradient(0,horizon-h*.2,0,horizon+3);haze.addColorStop(0,day?'rgba(172,213,220,0)':'rgba(31,67,79,0)');haze.addColorStop(1,day?'rgba(178,211,215,.38)':'rgba(48,94,106,.28)');ctx.globalAlpha=1;ctx.fillStyle=haze;ctx.fillRect(0,horizon-h*.24,w,h*.25);ctx.restore();
     }
 
+    function renderWorldLow(w,h){
+      const cam=state.camera||player,day=state.timeOfDay==='day',horizon=h/2+cam.pitch-player.recoil*h*.018;
+      ctx.fillStyle=day?'#6f9eac':'#07131b';ctx.fillRect(0,0,w,horizon);
+      ctx.fillStyle=day?'#1b2427':'#05090c';ctx.fillRect(0,horizon,w,h-horizon);
+      const fov=viewFov();
+      for(let x=0;x<w;x+=5){const cameraX=2*x/w-1,angle=cam.dir+Math.atan(cameraX*Math.tan(fov/2)),hit=castRay(angle,cam.x,cam.y,40,cam.z),dist=Math.max(.001,hit.dist*Math.cos(angle-cam.dir));const line=Math.min(h*4,h/dist),wallHeight=hit.height||WALL_HEIGHTS[hit.type]||1.35,top=horizon-line*(wallHeight-cam.z),bottom=horizon+line*cam.z;depthBuffer[x]=dist;wallTopBuffer[x]=top;wallBottomBuffer[x]=bottom;ctx.drawImage(textures[hit.type]||textures[1],hit.texX,0,1,TEX,x,top,6,bottom-top);}
+    }
+
     function renderWorld(w,h){
+      if(lowRenderPreset){renderWorldLow(w,h);return;}
       const cam=state.camera||player,day=state.timeOfDay==='day',horizon=h/2+cam.pitch-player.recoil*h*.018+(player.carIndex<0?Math.sin(player.bob*2)*player.bobAmount*1.2:0);
       const sky=ctx.createLinearGradient(0,0,0,horizon);if(day){sky.addColorStop(0,'#4e87a2');sky.addColorStop(.48,'#78acbd');sky.addColorStop(.82,'#b3ced1');sky.addColorStop(1,'#dfc6a4');}else{sky.addColorStop(0,'#010307');sky.addColorStop(.52,'#07111a');sky.addColorStop(.84,'#132933');sky.addColorStop(1,'#34505a');}ctx.fillStyle=sky;ctx.fillRect(0,0,w,Math.max(0,horizon));
       ctx.save();if(!day){ctx.globalAlpha=.7;for(let i=0;i<26;i++){const px=((i*173+state.totalTime*.4-cam.dir*90)%w+w)%w,py=(i*97%(Math.max(1,horizon*.66)));ctx.fillStyle=i%7===0?'#b4dbe4':'#7699a3';ctx.fillRect(px,py,1+(i%5===0),1+(i%5===0));}}const orbX=day?((.2-cam.dir/TAU)*w*1.35%w+w)%w:((.72-cam.dir/TAU)*w*1.4%w+w)%w,orbY=Math.max(34,horizon*(day?.23:.2));ctx.fillStyle=day?'rgba(255,236,186,.96)':'rgba(214,239,242,.82)';ctx.shadowColor=day?'#ffd789':'#a6e7eb';ctx.shadowBlur=day?48:26;ctx.beginPath();ctx.arc(orbX,orbY,Math.max(day?13:7,h*(day?.028:.018)),0,TAU);ctx.fill();ctx.restore();
@@ -716,7 +749,7 @@ import { AudioSystem } from '/audio.js';
       ctx.strokeStyle=day?'rgba(210,228,226,.08)':'rgba(122,202,204,.075)';ctx.lineWidth=1;
       for(let i=1;i<12;i++){const y=horizon+(h-horizon)*(1-Math.pow(.76,i));ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
       for(let x=-w;x<w*2;x+=w/10){ctx.beginPath();ctx.moveTo(w/2,horizon);ctx.lineTo(x,h);ctx.stroke();}
-      const rayStep=w>900?2:1,fov=viewFov();
+      const rayStep=lowRenderPreset?5:w>900?2:1,fov=viewFov();
       for(let x=0;x<w;x+=rayStep){
         const cameraX=2*x/w-1,angle=cam.dir+Math.atan(cameraX*Math.tan(fov/2)),hit=castRay(angle,cam.x,cam.y,40,cam.z),dist=Math.max(.001,hit.dist*Math.cos(angle-cam.dir));
         const line=Math.min(h*4,h/dist),wallHeight=hit.height||WALL_HEIGHTS[hit.type]||1.35,top=horizon-line*(wallHeight-cam.z),bottom=horizon+line*cam.z,wallH=bottom-top;
@@ -836,19 +869,21 @@ import { AudioSystem } from '/audio.js';
     async function saveCampaign(status='active',force=false){
       if(campaignCloud.syncing){if(force||status!=='active')campaignCloud.pendingStatus=status;return;}
       if(!force&&state.mode!=='playing')return;campaignCloud.syncing=true;if($('syncStatus'))$('syncStatus').textContent='SAVING';
+      const payload=campaignPayload(status);
+      if(campaignCloud.offline){writeLocalCampaign(status,payload);if(status==='active')campaignCloud.active={...payload};else{campaignCloud.records=[{...payload},...campaignCloud.records].slice(0,8);campaignCloud.active=null;}renderCampaignRecords();if($('syncStatus'))$('syncStatus').textContent='LOCAL SAVE';campaignCloud.syncing=false;return;}
       try{
-        const response=await fetch('/api/campaigns',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(campaignPayload(status))});
-        if(!response.ok)throw new Error(`save ${response.status}`);const data=await response.json();if(data.record?.id)campaignCloud.id=Number(data.record.id);if($('syncStatus'))$('syncStatus').textContent='CLOUD SAVED';
+        const response=await fetch('/api/campaigns',{method:'POST',headers:{'content-type':'application/json',accept:'application/json'},body:JSON.stringify(payload)});
+        if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`save ${response.status}`);const data=await response.json();if(data.available===false)throw new Error('campaign storage unavailable');if(data.record?.id)campaignCloud.id=Number(data.record.id);if($('syncStatus'))$('syncStatus').textContent='CLOUD SAVED';
         if(status!=='active'){campaignCloud.id=null;await loadCampaignRecords();}
-      }catch{if($('syncStatus'))$('syncStatus').textContent='SYNC RETRYING';}
-      finally{campaignCloud.syncing=false;const pending=campaignCloud.pendingStatus;campaignCloud.pendingStatus=null;if(pending)saveCampaign(pending,true);}
+      }catch{campaignCloud.offline=true;writeLocalCampaign(status,payload);useLocalCampaign();if($('syncStatus'))$('syncStatus').textContent='LOCAL SAVE';}
+      finally{campaignCloud.syncing=false;const pending=campaignCloud.pendingStatus;campaignCloud.pendingStatus=null;if(pending&&!campaignCloud.offline)saveCampaign(pending,true);}
     }
 
     async function loadCampaignRecords(){
       if($('syncStatus'))$('syncStatus').textContent='CONNECTING';
       try{
-        const response=await fetch('/api/campaigns',{headers:{accept:'application/json'}});if(!response.ok)throw new Error(`load ${response.status}`);const data=await response.json();campaignCloud.records=Array.isArray(data.records)?data.records:[];campaignCloud.active=data.active||null;campaignCloud.remoteBest=Number(data.best_score||0);if(data.career)for(const key of Object.keys(career))career[key]=Number(data.career[key]||0);renderCampaignRecords();renderArsenal();if($('syncStatus'))$('syncStatus').textContent='CLOUD READY';
-      }catch{campaignCloud.active=null;renderCampaignRecords();renderArsenal();if($('syncStatus'))$('syncStatus').textContent='SAVE UNAVAILABLE';}
+        const response=await fetch('/api/campaigns',{headers:{accept:'application/json'}});if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`load ${response.status}`);const data=await response.json();if(data.available===false)throw new Error('campaign storage unavailable');campaignCloud.offline=false;campaignCloud.records=Array.isArray(data.records)?data.records:[];campaignCloud.active=data.active||null;campaignCloud.remoteBest=Number(data.best_score||0);if(data.career)for(const key of Object.keys(career))career[key]=Number(data.career[key]||0);renderCampaignRecords();renderArsenal();if($('syncStatus'))$('syncStatus').textContent='CLOUD READY';
+      }catch{useLocalCampaign();if($('syncStatus'))$('syncStatus').textContent=campaignCloud.active||campaignCloud.records.length?'LOCAL SAVE':'SAVE UNAVAILABLE';}
       loadLeaderboard();
     }
 
@@ -871,8 +906,8 @@ import { AudioSystem } from '/audio.js';
     async function loadLeaderboard(){
       const status=$('leaderboardStatus');if(status)status.textContent='CONNECTING';
       try{
-        const response=await fetch('/api/leaderboard',{headers:{accept:'application/json'}});if(!response.ok)throw new Error(`leaderboard ${response.status}`);
-        const data=await response.json();renderLeaderboard(Array.isArray(data.entries)?data.entries:[]);if(status)status.textContent='LIVE RANKING';
+        const response=await fetch('/api/leaderboard',{headers:{accept:'application/json'}});if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`leaderboard ${response.status}`);
+        const data=await response.json();if(data.available===false)throw new Error('leaderboard unavailable');renderLeaderboard(Array.isArray(data.entries)?data.entries:[]);if(status)status.textContent='LIVE RANKING';
       }catch{renderLeaderboard([]);if(status)status.textContent='RANKING OFFLINE';}
     }
 
@@ -899,13 +934,13 @@ import { AudioSystem } from '/audio.js';
     function saveBestScore(score){const previous=readBestScore(),isBest=score>previous;if(isBest){try{localStorage.setItem('neon-breach-best',String(score));}catch{}}updateBestScore();return isBest;}
     function updateBestScore(){const best=Math.max(readBestScore(),campaignCloud.remoteBest||0);$('bestScoreTitle').textContent=`BEST RUN // ${String(best).padStart(6,'0')}`;}
 
-    function frame(t){const dt=Math.min(.033,Math.max(0,(t-state.lastTime)/1000||0));state.lastTime=t;updateGamepad(dt);update(dt);render();requestAnimationFrame(frame);}
+    function frame(t){const dt=Math.min(.033,Math.max(0,(t-state.lastTime)/1000||0));state.lastTime=t;updateGamepad(dt);update(dt);if(!state.threeReady)render();requestAnimationFrame(frame);}
 
     function syncFire(){input.fire=input.shiftFire||input.pointerFire;}
     function setKey(code,value){if(code==='KeyW'||code==='ArrowUp')input.forward=value;if(code==='KeyS'||code==='ArrowDown')input.back=value;if(code==='KeyA'||code==='ArrowLeft')input.left=value;if(code==='KeyD'||code==='ArrowRight')input.right=value;if(code==='ShiftLeft'||code==='ShiftRight'){input.shiftFire=value;syncFire();}if(code==='KeyQ')input.sprint=value;if(code==='Space')input.jump=value;}
     addEventListener('keydown',e=>{if(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();setKey(e.code,true);if(e.code==='Space'&&!e.repeat)startJump();if(e.code==='KeyR'&&!e.repeat)reload();if(e.code==='KeyF'&&!e.repeat)meleeTakedown();if(e.code==='KeyE'&&!e.repeat)toggleVehicle();if(e.code==='KeyT'&&!e.repeat)toggleAutoLock();if(/^Digit[1-4]$/.test(e.code)&&!e.repeat)equipWeapon(Number(e.code.slice(-1))-1);if(e.code==='KeyM'&&!e.repeat)toggleAudio();});
     addEventListener('keyup',e=>setKey(e.code,false));
-    addEventListener('blur',()=>{Object.keys(input).forEach(k=>input[k]=false);if(state.mode==='playing'&&!coarsePointer)pauseGame();});
+    addEventListener('blur',()=>{Object.keys(input).forEach(k=>input[k]=false);if(document.visibilityState==='hidden'&&state.mode==='playing'&&!coarsePointer)pauseGame();});
     addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(resize,80);});
     document.addEventListener('mousemove',e=>{if(state.mode==='playing'&&document.pointerLockElement===canvas){player.dir=normAngle(player.dir+e.movementX*.00225);player.pitch=Math.max(-canvas.height*.2,Math.min(canvas.height*.2,player.pitch-e.movementY*.32));}});
     document.addEventListener('mousedown',e=>{if(state.mode!=='playing')return;if(e.button===0){if(!coarsePointer&&document.pointerLockElement!==canvas)requestLock();else{input.pointerFire=true;syncFire();}}if(e.button===2)input.aim=true;});
@@ -962,8 +997,14 @@ import { AudioSystem } from '/audio.js';
     }
     window.__NEON_3D__={
       world:{map,WALL_HEIGHTS,GROUND_HEIGHT,MAP_W,MAP_H,STAIR_ZONES,enemyTypes:ENEMY_TYPES,weapons:WEAPONS},
-      frame:()=>({mode:state.mode,timeOfDay:state.timeOfDay,totalTime:state.totalTime,camera:state.camera||getRenderCamera(),player,enemies:state.enemies,cars:state.cars,corpses:state.corpses,bloodDecals:state.bloodDecals,brokenGlass:state.brokenGlass,projectiles:state.projectiles,pickups:state.pickups,particles:state.particles,muzzle:state.muzzle,melee:state.melee,screenShake:state.screenShake,fov:viewFov(),missionStage:state.missionStage,missionProgress:state.missionProgress,objectiveTarget:state.objectiveTarget,wavePhase:state.wavePhase,gore:state.gore,commander:state.commander}),
-      ready:()=>{state.threeReady=true;document.body.classList.add('three-ready');}
+      frame:()=>{threeFrame.mode=state.mode;threeFrame.timeOfDay=state.timeOfDay;threeFrame.totalTime=state.totalTime;threeFrame.camera=state.camera||getRenderCamera();threeFrame.player=player;threeFrame.enemies=state.enemies;threeFrame.cars=state.cars;threeFrame.corpses=state.corpses;threeFrame.bloodDecals=state.bloodDecals;threeFrame.brokenGlass=state.brokenGlass;threeFrame.projectiles=state.projectiles;threeFrame.pickups=state.pickups;threeFrame.particles=state.particles;threeFrame.muzzle=state.muzzle;threeFrame.melee=state.melee;threeFrame.screenShake=state.screenShake;threeFrame.fov=viewFov();threeFrame.missionStage=state.missionStage;threeFrame.missionProgress=state.missionProgress;threeFrame.objectiveTarget=state.objectiveTarget;threeFrame.wavePhase=state.wavePhase;threeFrame.gore=state.gore;threeFrame.commander=state.commander;return threeFrame;},
+      ready:(options={})=>{state.threeReady=!options.fallback;if(state.threeReady)document.body.classList.add('three-ready');else document.body.classList.add('three-fallback');},
+      fail:(error)=>{state.threeReady=false;const screen=$('webglErrorScreen'),text=$('webglErrorText');if(text&&error)text.textContent=`The 3D renderer could not start (${String(error.message||error).slice(0,140)}). Update your browser or enable hardware acceleration to continue.`;screen?.classList.remove('hidden');}
     };
+    const webglProbe=document.createElement('canvas');
+    let webgl2Available=false;try{webgl2Available=!!webglProbe.getContext('webgl2');}catch{}
+    if(compatibilityMode)window.__NEON_3D__.ready({fallback:true});
+    else if(webgl2Available)import('/scene3d.js').catch(error=>window.__NEON_3D__.fail(error));
+    else window.__NEON_3D__.fail(new Error('WebGL2 context unavailable'));
     if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
     let preferredTime='day',preferredAutoLock=true,preferredGore=true,preferredOperation=0;try{preferredTime=localStorage.getItem('neon-breach-time')||'day';preferredAutoLock=localStorage.getItem('neon-breach-auto-lock')!=='off';preferredGore=localStorage.getItem('neon-breach-gore')!=='off';preferredOperation=Number(localStorage.getItem('neon-breach-operation')||0);}catch{}setMissionTime(preferredTime,false);setAutoLock(preferredAutoLock,false,false);setGore(preferredGore,false);setOperation(preferredOperation,false);renderArsenal();updateBestScore();loadCampaignRecords();initAssets();resize();setupTouch();render();requestAnimationFrame(frame);

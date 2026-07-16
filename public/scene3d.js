@@ -1,22 +1,25 @@
 import * as THREE from '/vendor/three.module.min.js';
+import { cacheWorldCullRecord, shouldRenderCullRecord } from '/render-utils.js';
 
 const bridge = window.__NEON_3D__;
 if (!bridge) throw new Error('NEON 3D bridge was not initialized.');
 
 const coarse = matchMedia('(pointer: coarse)').matches;
+let lowPreset = new URLSearchParams(location.search).get('quality') === 'low';
+try { lowPreset ||= localStorage.getItem('neon-breach-quality') === 'low'; } catch {}
 const canvas = document.createElement('canvas');
 canvas.id = 'threeGame';
 canvas.setAttribute('aria-hidden', 'true');
 document.body.prepend(canvas);
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: !coarse, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio || 1, coarse ? 1.15 : 1.65));
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !coarse && !lowPreset, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, lowPreset ? .6 : coarse ? 1.15 : 1.0));
 renderer.setSize(innerWidth, innerHeight, false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.08;
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = coarse ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+renderer.shadowMap.enabled = !lowPreset;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x9bb7bd);
@@ -36,7 +39,7 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffe6bd, 2.6);
 sun.position.set(8, 18, 4);
 sun.castShadow = true;
-sun.shadow.mapSize.set(coarse ? 1024 : 2048, coarse ? 1024 : 2048);
+sun.shadow.mapSize.set(lowPreset ? 512 : coarse ? 1024 : 1024, lowPreset ? 512 : coarse ? 1024 : 1024);
 sun.shadow.camera.left = -18;
 sun.shadow.camera.right = 18;
 sun.shadow.camera.top = 18;
@@ -75,14 +78,17 @@ function buildWorld() {
   const ground = mesh(new THREE.PlaneGeometry(58, 58), mat(0x182123, .96, .02), false, true);
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(MAP_W / 2, -.025, MAP_H / 2);
+  ground.userData.lowCullAlwaysVisible = true;
   worldRoot.add(ground);
 
   const roadMaterial = mat(0x111719, .92, .04);
   const roadA = mesh(new THREE.PlaneGeometry(5.3, MAP_H - 2), roadMaterial, false, true);
   roadA.rotation.x = -Math.PI / 2;
   roadA.position.set(12, .006, 12);
+  roadA.userData.lowCullAlwaysVisible = true;
   const roadB = roadA.clone();
   roadB.geometry = new THREE.PlaneGeometry(MAP_W - 2, 5.3);
+  roadB.userData.lowCullAlwaysVisible = true;
   worldRoot.add(roadA, roadB);
 
   const stripeMaterial = new THREE.MeshBasicMaterial({ color: 0xb7c8c7 });
@@ -144,6 +150,14 @@ function buildWorld() {
 
 const glassMeshes = new Map();
 buildWorld();
+const lowCullables = [];
+if (lowPreset) {
+  worldRoot.updateMatrixWorld(true);
+  const worldPosition = new THREE.Vector3();
+  worldRoot.traverse(object => {
+    if (object.isMesh) lowCullables.push(cacheWorldCullRecord(object, worldPosition));
+  });
+}
 
 const terminal = new THREE.Group();
 const terminalBase = mesh(new THREE.BoxGeometry(.55,.78,.4),darkMetal);
@@ -359,6 +373,7 @@ const projectileMeshes = new WeakMap();
 const pickupMeshes = new WeakMap();
 const particleMeshes = new WeakMap();
 const rendered = { enemies: new Set(), cars: new Set(), corpses: new Set(), blood: new Set(), projectiles: new Set(), pickups: new Set(), particles: new Set() };
+const frameSets = { enemies: new Set(), cars: new Set(), corpses: new Set(), blood: new Set(), projectiles: new Set(), pickups: new Set(), particles: new Set() };
 const particleGeometry = new THREE.SphereGeometry(.025, 5, 4);
 const particleMaterials = new Map();
 
@@ -367,7 +382,7 @@ function prune(set, current) {
 }
 
 function syncEnemies(frame) {
-  const current = new Set();
+  const current = frameSets.enemies; current.clear();
   for (const enemy of frame.enemies) {
     let object = enemyMeshes.get(enemy);
     if (!object) { object = createHuman(enemy.type, enemy.variant || 0, enemy.elite,enemy.commander); enemyMeshes.set(enemy, object); actorRoot.add(object); rendered.enemies.add(object); }
@@ -381,7 +396,7 @@ function syncEnemies(frame) {
 }
 
 function syncCars(frame) {
-  const current = new Set();
+  const current = frameSets.cars; current.clear();
   for (const car of frame.cars) {
     let object = carMeshes.get(car);
     if (!object) { object = createCar(car.color); carMeshes.set(car, object); actorRoot.add(object); rendered.cars.add(object); }
@@ -395,7 +410,7 @@ function syncCars(frame) {
 }
 
 function syncCorpses(frame) {
-  const current = new Set();
+  const current = frameSets.corpses; current.clear();
   for (const corpse of frame.corpses) {
     let object = corpseMeshes.get(corpse);
     if (!object) {
@@ -419,7 +434,7 @@ function syncCorpses(frame) {
 }
 
 function syncBlood(frame) {
-  const current = new Set();
+  const current = frameSets.blood; current.clear();
   for (const blood of frame.bloodDecals) {
     let object = bloodMeshes.get(blood);
     if (!object) {
@@ -437,7 +452,7 @@ function syncBlood(frame) {
 }
 
 function syncProjectiles(frame) {
-  const current = new Set();
+  const current = frameSets.projectiles; current.clear();
   for (const projectile of frame.projectiles) {
     let object = projectileMeshes.get(projectile);
     if (!object) {
@@ -452,7 +467,7 @@ function syncProjectiles(frame) {
 }
 
 function syncPickups(frame) {
-  const current = new Set();
+  const current = frameSets.pickups; current.clear();
   const colors = { health: 0xff536d, ammo: 0xffbb55, shield: 0x31f5db, armor: 0xd8e7e9 };
   for (const pickup of frame.pickups) {
     let object = pickupMeshes.get(pickup);
@@ -469,7 +484,7 @@ function syncPickups(frame) {
 }
 
 function syncParticles(frame) {
-  const current = new Set();
+  const current = frameSets.particles; current.clear();
   for (const particle of frame.particles) {
     let object = particleMeshes.get(particle);
     if (!object) {
@@ -528,13 +543,23 @@ function updateCamera(frame) {
 }
 
 function syncGlass(frame) {
+  if (lowPreset) return;
   for (const [key, object] of glassMeshes) object.visible = !frame.brokenGlass.has(key);
+}
+
+function cullLowWorld(frame) {
+  if (!lowPreset) return;
+  const x = frame.camera?.x ?? 12, y = frame.camera?.y ?? 12;
+  for (const record of lowCullables) {
+    record.object.visible = shouldRenderCullRecord(record, x, y, frame.brokenGlass);
+  }
 }
 
 function animate() {
   const frame = bridge.frame();
   updateEnvironment(frame);
   updateCamera(frame);
+  cullLowWorld(frame);
   syncGlass(frame);
   syncEnemies(frame);
   syncCars(frame);
@@ -555,7 +580,7 @@ function animate() {
 //   L0 .78x pixels, no post   L1 1x, no post
 //   L2 1.3x, bloom            L3 1.65x, bloom (desktop default)
 const QUALITY_PIXEL = [.78, 1, 1.3, 1.65];
-const fx = { quality: coarse ? 1 : 2, maxQuality: coarse ? 2 : 3, ema: 16, lastTime: performance.now(), lastStep: performance.now() };
+const fx = { quality: lowPreset ? 0 : coarse ? 1 : 1, maxQuality: lowPreset ? 0 : coarse ? 2 : 2, ema: 16, lastTime: performance.now(), lastStep: performance.now() };
 const postQuad = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const fullscreen = new THREE.PlaneGeometry(2, 2);
 let sceneTarget = null, bloomA = null, bloomB = null;
@@ -605,6 +630,9 @@ function renderFrame() {
 function applyQuality() {
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, QUALITY_PIXEL[fx.quality]));
   renderer.setSize(innerWidth, innerHeight, false);
+  renderer.shadowMap.enabled = fx.quality >= 1;
+  renderer.shadowMap.autoUpdate = fx.quality >= 2;
+  sun.castShadow = fx.quality >= 1;
   if (fx.quality >= 2) buildTargets();
 }
 
@@ -619,6 +647,7 @@ function tuneQuality() {
 window.__NEON_FX__ = { quality: () => fx.quality, frameMs: () => fx.ema, post: () => fx.quality >= 2,
   // Test/dev hook: pin a quality level (pass null to resume auto-scaling).
   force: level => { fx.forced = level === null ? null : Math.max(0, Math.min(3, level | 0)); if (fx.forced !== null) { fx.quality = fx.forced; applyQuality(); } } };
+window.__NEON_RENDER_STATS__ = () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, points: renderer.info.render.points, lines: renderer.info.render.lines, textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries });
 
 addEventListener('resize', () => {
   applyQuality();

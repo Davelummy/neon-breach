@@ -16,6 +16,7 @@ const manifest = await readFile('public/manifest.webmanifest', 'utf8');
 const serviceWorker = await readFile('public/sw.js', 'utf8');
 const icon = await readFile('public/icon.svg', 'utf8');
 const scene3d = await readFile('public/scene3d.js', 'utf8');
+const renderUtils = await readFile('public/render-utils.js', 'utf8');
 const gameJs = await readFile('public/game.js', 'utf8');
 const dataJs = await readFile('public/data.js', 'utf8');
 const audioJs = await readFile('public/audio.js', 'utf8');
@@ -61,6 +62,7 @@ const assets = {
   '/sw.js': { body: ${JSON.stringify(serviceWorker)}, type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
   '/icon.svg': { body: ${JSON.stringify(icon)}, type: 'image/svg+xml; charset=utf-8', cache: 'public, max-age=86400' },
   '/scene3d.js': { body: ${JSON.stringify(scene3d)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=3600' },
+  '/render-utils.js': { body: ${JSON.stringify(renderUtils)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=3600' },
   '/game.js': { body: ${JSON.stringify(gameJs)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=3600' },
   '/data.js': { body: ${JSON.stringify(dataJs)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=3600' },
   '/audio.js': { body: ${JSON.stringify(audioJs)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=3600' },
@@ -152,6 +154,8 @@ const handler = {
       try { return await handleLeaderboard(request, env); }
       catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'Leaderboard service failed.' }, { status: 500 }); }
     }
+
+    if (url.pathname.startsWith('/api/')) return Response.json({ error: 'API route not found.' }, { status: 404 });
 
     const asset = assets[url.pathname];
     if (asset) {
