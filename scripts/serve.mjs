@@ -26,8 +26,8 @@ createServer((request, response) => {
   const pathname = new URL(request.url, 'http://localhost').pathname;
   if (pathname === '/health') return json(response, 200, { status: 'ok', game: 'NEON BREACH' });
   if (pathname.startsWith('/api/')) {
-    if (pathname === '/api/campaigns') return json(response, 503, { error: 'Campaign storage is unavailable in the local server.' });
-    if (pathname === '/api/leaderboard') return json(response, 503, { error: 'Leaderboard storage is unavailable in the local server.' });
+    if (pathname === '/api/campaigns') return json(response, 200, { available: false, error: 'Campaign storage is unavailable in the local server.' });
+    if (pathname === '/api/leaderboard') return json(response, 200, { available: false, error: 'Leaderboard storage is unavailable in the local server.' });
     return json(response, 404, { error: 'API route not found.' });
   }
   const fallback = existsSync(join(root, 'index.html')) ? 'index.html' : 'neon-breach.html';

@@ -868,7 +868,7 @@ import { AudioSystem } from '/audio.js';
       if(campaignCloud.offline){writeLocalCampaign(status,payload);if(status==='active')campaignCloud.active={...payload};else{campaignCloud.records=[{...payload},...campaignCloud.records].slice(0,8);campaignCloud.active=null;}renderCampaignRecords();if($('syncStatus'))$('syncStatus').textContent='LOCAL SAVE';campaignCloud.syncing=false;return;}
       try{
         const response=await fetch('/api/campaigns',{method:'POST',headers:{'content-type':'application/json',accept:'application/json'},body:JSON.stringify(payload)});
-        if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`save ${response.status}`);const data=await response.json();if(data.record?.id)campaignCloud.id=Number(data.record.id);if($('syncStatus'))$('syncStatus').textContent='CLOUD SAVED';
+        if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`save ${response.status}`);const data=await response.json();if(data.available===false)throw new Error('campaign storage unavailable');if(data.record?.id)campaignCloud.id=Number(data.record.id);if($('syncStatus'))$('syncStatus').textContent='CLOUD SAVED';
         if(status!=='active'){campaignCloud.id=null;await loadCampaignRecords();}
       }catch{campaignCloud.offline=true;writeLocalCampaign(status,payload);useLocalCampaign();if($('syncStatus'))$('syncStatus').textContent='LOCAL SAVE';}
       finally{campaignCloud.syncing=false;const pending=campaignCloud.pendingStatus;campaignCloud.pendingStatus=null;if(pending&&!campaignCloud.offline)saveCampaign(pending,true);}
@@ -877,7 +877,7 @@ import { AudioSystem } from '/audio.js';
     async function loadCampaignRecords(){
       if($('syncStatus'))$('syncStatus').textContent='CONNECTING';
       try{
-        const response=await fetch('/api/campaigns',{headers:{accept:'application/json'}});if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`load ${response.status}`);const data=await response.json();campaignCloud.offline=false;campaignCloud.records=Array.isArray(data.records)?data.records:[];campaignCloud.active=data.active||null;campaignCloud.remoteBest=Number(data.best_score||0);if(data.career)for(const key of Object.keys(career))career[key]=Number(data.career[key]||0);renderCampaignRecords();renderArsenal();if($('syncStatus'))$('syncStatus').textContent='CLOUD READY';
+        const response=await fetch('/api/campaigns',{headers:{accept:'application/json'}});if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`load ${response.status}`);const data=await response.json();if(data.available===false)throw new Error('campaign storage unavailable');campaignCloud.offline=false;campaignCloud.records=Array.isArray(data.records)?data.records:[];campaignCloud.active=data.active||null;campaignCloud.remoteBest=Number(data.best_score||0);if(data.career)for(const key of Object.keys(career))career[key]=Number(data.career[key]||0);renderCampaignRecords();renderArsenal();if($('syncStatus'))$('syncStatus').textContent='CLOUD READY';
       }catch{useLocalCampaign();if($('syncStatus'))$('syncStatus').textContent=campaignCloud.active||campaignCloud.records.length?'LOCAL SAVE':'SAVE UNAVAILABLE';}
       loadLeaderboard();
     }
@@ -902,7 +902,7 @@ import { AudioSystem } from '/audio.js';
       const status=$('leaderboardStatus');if(status)status.textContent='CONNECTING';
       try{
         const response=await fetch('/api/leaderboard',{headers:{accept:'application/json'}});if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`leaderboard ${response.status}`);
-        const data=await response.json();renderLeaderboard(Array.isArray(data.entries)?data.entries:[]);if(status)status.textContent='LIVE RANKING';
+        const data=await response.json();if(data.available===false)throw new Error('leaderboard unavailable');renderLeaderboard(Array.isArray(data.entries)?data.entries:[]);if(status)status.textContent='LIVE RANKING';
       }catch{renderLeaderboard([]);if(status)status.textContent='RANKING OFFLINE';}
     }
 
