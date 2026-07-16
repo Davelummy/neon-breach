@@ -1,4 +1,5 @@
 import * as THREE from '/vendor/three.module.min.js';
+import { cacheWorldCullRecord, shouldRenderCullRecord } from '/render-utils.js';
 
 const bridge = window.__NEON_3D__;
 if (!bridge) throw new Error('NEON 3D bridge was not initialized.');
@@ -77,14 +78,17 @@ function buildWorld() {
   const ground = mesh(new THREE.PlaneGeometry(58, 58), mat(0x182123, .96, .02), false, true);
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(MAP_W / 2, -.025, MAP_H / 2);
+  ground.userData.lowCullAlwaysVisible = true;
   worldRoot.add(ground);
 
   const roadMaterial = mat(0x111719, .92, .04);
   const roadA = mesh(new THREE.PlaneGeometry(5.3, MAP_H - 2), roadMaterial, false, true);
   roadA.rotation.x = -Math.PI / 2;
   roadA.position.set(12, .006, 12);
+  roadA.userData.lowCullAlwaysVisible = true;
   const roadB = roadA.clone();
   roadB.geometry = new THREE.PlaneGeometry(MAP_W - 2, 5.3);
+  roadB.userData.lowCullAlwaysVisible = true;
   worldRoot.add(roadA, roadB);
 
   const stripeMaterial = new THREE.MeshBasicMaterial({ color: 0xb7c8c7 });
@@ -147,7 +151,13 @@ function buildWorld() {
 const glassMeshes = new Map();
 buildWorld();
 const lowCullables = [];
-if (lowPreset) worldRoot.traverse(object => { if (object.isMesh) lowCullables.push(object); });
+if (lowPreset) {
+  worldRoot.updateMatrixWorld(true);
+  const worldPosition = new THREE.Vector3();
+  worldRoot.traverse(object => {
+    if (object.isMesh) lowCullables.push(cacheWorldCullRecord(object, worldPosition));
+  });
+}
 
 const terminal = new THREE.Group();
 const terminalBase = mesh(new THREE.BoxGeometry(.55,.78,.4),darkMetal);
@@ -533,15 +543,15 @@ function updateCamera(frame) {
 }
 
 function syncGlass(frame) {
+  if (lowPreset) return;
   for (const [key, object] of glassMeshes) object.visible = !frame.brokenGlass.has(key);
 }
 
 function cullLowWorld(frame) {
   if (!lowPreset) return;
   const x = frame.camera?.x ?? 12, y = frame.camera?.y ?? 12;
-  for (const object of lowCullables) {
-    const dx = object.position.x - x, dz = object.position.z - y;
-    object.visible = dx * dx + dz * dz < 20 * 20;
+  for (const record of lowCullables) {
+    record.object.visible = shouldRenderCullRecord(record, x, y, frame.brokenGlass);
   }
 }
 

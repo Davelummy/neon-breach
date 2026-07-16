@@ -1,5 +1,5 @@
-const CACHE = 'neon-breach-v43';
-const CORE = ['/', '/manifest.webmanifest', '/icon.svg', '/game.js', '/data.js', '/audio.js', '/scene3d.js', '/vendor/three.module.min.js', '/vendor/three.core.min.js'];
+const CACHE = 'neon-breach-v44';
+const CORE = ['/', '/manifest.webmanifest', '/icon.svg', '/game.js', '/data.js', '/audio.js', '/scene3d.js', '/render-utils.js', '/vendor/three.module.min.js', '/vendor/three.core.min.js'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(CORE)).then(() => self.skipWaiting()));
