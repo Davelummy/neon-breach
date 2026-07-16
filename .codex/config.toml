@@ -1,0 +1,111 @@
+# Project-scoped MCP configuration for NEON BREACH.
+#
+# Codex loads this file only after the repository is trusted. Servers that need
+# paid accounts, secrets, desktop applications, or Docker remain disabled until
+# their prerequisites are complete. Never put API keys in this file.
+
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+enabled = true
+required = false
+startup_timeout_sec = 30
+tool_timeout_sec = 60
+default_tools_approval_mode = "auto"
+
+[mcp_servers.playwright]
+command = "npx"
+args = ["-y", "@playwright/mcp@latest", "--headless", "--isolated", "--browser", "chrome"]
+enabled = true
+required = false
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+default_tools_approval_mode = "prompt"
+
+# Enable after Google Chrome is installed on the Codex host.
+[mcp_servers.chrome_devtools]
+command = "npx"
+args = ["-y", "chrome-devtools-mcp@latest", "--headless", "--no-usage-statistics"]
+enabled = false
+required = false
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+default_tools_approval_mode = "prompt"
+
+# Enable after Blender, its BlenderMCP add-on, and uv are installed. The add-on
+# must be running inside Blender before Codex invokes Blender tools.
+[mcp_servers.blender]
+command = "uvx"
+args = ["--python", "3.11", "blender-mcp"]
+env = { UV_PYTHON_PREFERENCE = "only-managed" }
+enabled = false
+required = false
+startup_timeout_sec = 60
+tool_timeout_sec = 300
+default_tools_approval_mode = "prompt"
+
+# Enable after MESHY_API_KEY is set in the environment that launches Codex.
+[mcp_servers.meshy]
+command = "npx"
+args = ["-y", "@meshy-ai/meshy-mcp-server"]
+env_vars = ["MESHY_API_KEY"]
+enabled = false
+required = false
+startup_timeout_sec = 60
+tool_timeout_sec = 600
+default_tools_approval_mode = "prompt"
+
+# Enable after uv is installed and ELEVENLABS_API_KEY is set. Generated files
+# are kept outside Git by the output directory documented in docs/mcp-setup.md.
+[mcp_servers.elevenlabs]
+command = "uvx"
+args = ["elevenlabs-mcp"]
+env_vars = ["ELEVENLABS_API_KEY", "ELEVENLABS_MCP_BASE_PATH", "ELEVENLABS_MCP_OUTPUT_MODE"]
+enabled = false
+required = false
+startup_timeout_sec = 60
+tool_timeout_sec = 600
+default_tools_approval_mode = "prompt"
+
+# Uses Sentry's OAuth flow. Enable after a Sentry project exists, restart Codex,
+# then authenticate this server from Settings > MCP servers.
+[mcp_servers.sentry]
+url = "https://mcp.sentry.dev/mcp"
+auth = "oauth"
+enabled = false
+required = false
+tool_timeout_sec = 120
+default_tools_approval_mode = "writes"
+
+# Enable after the two credentials are set locally. Do not commit them.
+[mcp_servers.browserstack]
+command = "npx"
+args = ["-y", "@browserstack/mcp-server@latest"]
+env_vars = ["BROWSERSTACK_USERNAME", "BROWSERSTACK_ACCESS_KEY"]
+enabled = false
+required = false
+startup_timeout_sec = 60
+tool_timeout_sec = 300
+default_tools_approval_mode = "prompt"
+
+# Uses PostHog OAuth. Enable only after privacy-safe telemetry has been approved
+# and a PostHog project has been created.
+[mcp_servers.posthog]
+url = "https://mcp.posthog.com/mcp"
+auth = "oauth"
+enabled = false
+required = false
+tool_timeout_sec = 120
+default_tools_approval_mode = "writes"
+
+# Optional release-quality gate. Enable after Docker and SonarQube Cloud/Server
+# are configured and the two environment variables are set locally.
+[mcp_servers.sonarqube]
+command = "docker"
+args = ["run", "--init", "--pull=always", "--rm", "-i", "-e", "SONARQUBE_TOKEN", "-e", "SONARQUBE_ORG", "sonarsource/sonarqube-mcp"]
+env_vars = ["SONARQUBE_TOKEN", "SONARQUBE_ORG"]
+enabled = false
+required = false
+startup_timeout_sec = 120
+tool_timeout_sec = 300
+default_tools_approval_mode = "prompt"
