@@ -4,14 +4,15 @@ const bridge = window.__NEON_3D__;
 if (!bridge) throw new Error('NEON 3D bridge was not initialized.');
 
 const coarse = matchMedia('(pointer: coarse)').matches;
-const lowPreset = new URLSearchParams(location.search).get('quality') === 'low' || localStorage.getItem('neon-breach-quality') === 'low';
+let lowPreset = new URLSearchParams(location.search).get('quality') === 'low';
+try { lowPreset ||= localStorage.getItem('neon-breach-quality') === 'low'; } catch {}
 const canvas = document.createElement('canvas');
 canvas.id = 'threeGame';
 canvas.setAttribute('aria-hidden', 'true');
 document.body.prepend(canvas);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !coarse && !lowPreset, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio || 1, lowPreset ? .78 : coarse ? 1.15 : 1.0));
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, lowPreset ? .6 : coarse ? 1.15 : 1.0));
 renderer.setSize(innerWidth, innerHeight, false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -145,6 +146,8 @@ function buildWorld() {
 
 const glassMeshes = new Map();
 buildWorld();
+const lowCullables = [];
+if (lowPreset) worldRoot.traverse(object => { if (object.isMesh) lowCullables.push(object); });
 
 const terminal = new THREE.Group();
 const terminalBase = mesh(new THREE.BoxGeometry(.55,.78,.4),darkMetal);
@@ -533,10 +536,20 @@ function syncGlass(frame) {
   for (const [key, object] of glassMeshes) object.visible = !frame.brokenGlass.has(key);
 }
 
+function cullLowWorld(frame) {
+  if (!lowPreset) return;
+  const x = frame.camera?.x ?? 12, y = frame.camera?.y ?? 12;
+  for (const object of lowCullables) {
+    const dx = object.position.x - x, dz = object.position.z - y;
+    object.visible = dx * dx + dz * dz < 20 * 20;
+  }
+}
+
 function animate() {
   const frame = bridge.frame();
   updateEnvironment(frame);
   updateCamera(frame);
+  cullLowWorld(frame);
   syncGlass(frame);
   syncEnemies(frame);
   syncCars(frame);
@@ -624,6 +637,7 @@ function tuneQuality() {
 window.__NEON_FX__ = { quality: () => fx.quality, frameMs: () => fx.ema, post: () => fx.quality >= 2,
   // Test/dev hook: pin a quality level (pass null to resume auto-scaling).
   force: level => { fx.forced = level === null ? null : Math.max(0, Math.min(3, level | 0)); if (fx.forced !== null) { fx.quality = fx.forced; applyQuality(); } } };
+window.__NEON_RENDER_STATS__ = () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, points: renderer.info.render.points, lines: renderer.info.render.lines, textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries });
 
 addEventListener('resize', () => {
   applyQuality();
@@ -632,5 +646,5 @@ addEventListener('resize', () => {
 });
 
 applyQuality();
-if (lowPreset) bridge.ready({ fallback: true });
-else { renderer.setAnimationLoop(animate); bridge.ready(); }
+renderer.setAnimationLoop(animate);
+bridge.ready();

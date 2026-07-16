@@ -71,16 +71,32 @@ try {
   const airborne = await page.evaluate(() => window.__NEON_QA__.snapshot());
   check('jet flight gains altitude', airborne.z > 0.6, `z=${airborne.z.toFixed(2)}`);
 
-  // 3D layer: with the dev server mapping /vendor/, three.js must boot even in
-  // headless SwiftShader, flip body.three-ready, and expose the FX controller.
+  // Genuine 3D layer: WebGL2 must initialize, submit real Three.js frames,
+  // and hide the legacy Canvas layer. Compatibility mode is tested separately.
   let rendererReady = false;
-  try { await waitForState(page, () => document.body.classList.contains('three-ready') || document.body.classList.contains('three-fallback'), 10000); rendererReady = true; } catch {}
-  check('3D renderer initialized headlessly', rendererReady);
+  try { await waitForState(page, () => document.body.classList.contains('three-ready'), 10000); rendererReady = true; } catch {}
+  check('genuine 3D renderer initialized', rendererReady);
   if (rendererReady) {
-    const fxState = await page.evaluate(() => ({ q: window.__NEON_FX__?.quality(), ms: Math.round(window.__NEON_FX__?.frameMs() || 0), post: window.__NEON_FX__?.post() }));
-    check('adaptive quality controller online', Number.isInteger(fxState.q) && fxState.q >= 0 && fxState.q <= 3, `quality=${fxState.q} frame=${fxState.ms}ms post=${fxState.post}`);
+    const renderState = await page.evaluate(() => ({
+      fx: { q: window.__NEON_FX__?.quality(), ms: Math.round(window.__NEON_FX__?.frameMs() || 0), post: window.__NEON_FX__?.post() },
+      stats: window.__NEON_RENDER_STATS__?.(),
+      threeVisible: getComputedStyle(document.querySelector('#threeGame')).display !== 'none',
+      canvasHidden: getComputedStyle(document.querySelector('#game')).opacity === '0'
+    }));
+    check('adaptive quality controller online', Number.isInteger(renderState.fx.q) && renderState.fx.q >= 0 && renderState.fx.q <= 3, `quality=${renderState.fx.q} frame=${renderState.fx.ms}ms post=${renderState.fx.post}`);
+    check('Three.js submits frames', renderState.stats?.calls > 0 && renderState.stats?.triangles > 0, `calls=${renderState.stats?.calls} triangles=${renderState.stats?.triangles}`);
+    check('3D canvas visible and Canvas layer hidden', renderState.threeVisible && renderState.canvasHidden, `threeVisible=${renderState.threeVisible} canvasHidden=${renderState.canvasHidden}`);
     await page.screenshot({ path: process.env.SMOKE_SHOT || 'smoke-gameplay.png' });
   }
+
+  // Explicit compatibility mode: this is the only path allowed to use Canvas.
+  await page.goto(`http://127.0.0.1:${PORT}/?qa&renderer=compat`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await waitForState(page, () => Boolean(window.__NEON_QA__), 10000);
+  await waitForState(page, () => document.body.classList.contains('three-fallback'), 5000);
+  await page.evaluate(() => document.getElementById('deployButton').click());
+  await waitForState(page, () => window.__NEON_QA__.snapshot().mode === 'playing', 5000);
+  const compatState = await page.evaluate(() => ({ fallback: document.body.classList.contains('three-fallback'), genuine: document.body.classList.contains('three-ready'), canvasOpacity: getComputedStyle(document.querySelector('#game')).opacity }));
+  check('explicit compatibility mode is separate', compatState.fallback && !compatState.genuine && compatState.canvasOpacity !== '0', JSON.stringify(compatState));
 
   // Second scenario: select operation 2 (NIGHT RAPTOR) from the menu and play
   // it through every stage type — reach, defend, hvt, extract.

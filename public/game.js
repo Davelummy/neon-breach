@@ -12,7 +12,8 @@ import { AudioSystem } from '/audio.js';
     const radar = $('radar');
     const rctx = radar.getContext('2d');
     const coarsePointer = matchMedia('(pointer: coarse)').matches;
-    const lowRenderPreset = new URLSearchParams(location.search).get('quality') === 'low' || (()=>{try{return localStorage.getItem('neon-breach-quality')==='low';}catch{return false;}})();
+    const compatibilityMode = new URLSearchParams(location.search).get('renderer') === 'compat';
+    const lowRenderPreset = compatibilityMode || new URLSearchParams(location.search).get('quality') === 'low' || (()=>{try{return localStorage.getItem('neon-breach-quality')==='low';}catch{return false;}})();
     const TAU = Math.PI * 2;
     const FOV = Math.PI / 3;
 
@@ -33,6 +34,8 @@ import { AudioSystem } from '/audio.js';
       hurtTimer: 0, alive: true, shots: 0, hits: 0, grounded: true, jetFuel: 100, jetting: false, ads: 0, stepTimer: 0, jetSoundTimer: 0,
       weaponIndex:0,weaponSlots:[],carIndex:-1,gamepadAimValue:0,moveVx:0,moveVy:0
     };
+    const renderCamera = { x: 0, y: 0, z: 0, dir: 0, pitch: 0 };
+    const threeFrame = {};
 
     const input = { forward:false, back:false, left:false, right:false, sprint:false, fire:false, shiftFire:false, pointerFire:false, aim:false, jump:false,gamepadFire:false,gamepadAim:false,gamepadAimValue:0,gamepadJump:false,gamepadSprint:false };
     let moveAxis = {x:0,y:0};
@@ -707,8 +710,10 @@ import { AudioSystem } from '/audio.js';
     }
 
     function getRenderCamera(){
-      if(player.carIndex<0)return{x:player.x,y:player.y,z:player.z,dir:player.dir,pitch:player.pitch};const car=state.cars[player.carIndex];let distance=2.05,cx=car.x-Math.cos(car.dir)*distance,cy=car.y-Math.sin(car.dir)*distance;
-      while(distance>.62&&blocksAt(cx,cy,.94)){distance-=.18;cx=car.x-Math.cos(car.dir)*distance;cy=car.y-Math.sin(car.dir)*distance;}return{x:cx,y:cy,z:.96,dir:car.dir,pitch:player.pitch*.28-24};
+      if(player.carIndex<0){renderCamera.x=player.x;renderCamera.y=player.y;renderCamera.z=player.z;renderCamera.dir=player.dir;renderCamera.pitch=player.pitch;return renderCamera;}
+      const car=state.cars[player.carIndex];let distance=2.05,cx=car.x-Math.cos(car.dir)*distance,cy=car.y-Math.sin(car.dir)*distance;
+      while(distance>.62&&blocksAt(cx,cy,.94)){distance-=.18;cx=car.x-Math.cos(car.dir)*distance;cy=car.y-Math.sin(car.dir)*distance;}
+      renderCamera.x=cx;renderCamera.y=cy;renderCamera.z=.96;renderCamera.dir=car.dir;renderCamera.pitch=player.pitch*.28-24;return renderCamera;
     }
 
     function viewFov(){return player.carIndex>=0?FOV*1.16:FOV*(1-player.ads*weaponConfig().zoom);}
@@ -929,7 +934,7 @@ import { AudioSystem } from '/audio.js';
     function saveBestScore(score){const previous=readBestScore(),isBest=score>previous;if(isBest){try{localStorage.setItem('neon-breach-best',String(score));}catch{}}updateBestScore();return isBest;}
     function updateBestScore(){const best=Math.max(readBestScore(),campaignCloud.remoteBest||0);$('bestScoreTitle').textContent=`BEST RUN // ${String(best).padStart(6,'0')}`;}
 
-    function frame(t){const dt=Math.min(.033,Math.max(0,(t-state.lastTime)/1000||0));state.lastTime=t;updateGamepad(dt);update(dt);render();requestAnimationFrame(frame);}
+    function frame(t){const dt=Math.min(.033,Math.max(0,(t-state.lastTime)/1000||0));state.lastTime=t;updateGamepad(dt);update(dt);if(!state.threeReady)render();requestAnimationFrame(frame);}
 
     function syncFire(){input.fire=input.shiftFire||input.pointerFire;}
     function setKey(code,value){if(code==='KeyW'||code==='ArrowUp')input.forward=value;if(code==='KeyS'||code==='ArrowDown')input.back=value;if(code==='KeyA'||code==='ArrowLeft')input.left=value;if(code==='KeyD'||code==='ArrowRight')input.right=value;if(code==='ShiftLeft'||code==='ShiftRight'){input.shiftFire=value;syncFire();}if(code==='KeyQ')input.sprint=value;if(code==='Space')input.jump=value;}
@@ -992,13 +997,14 @@ import { AudioSystem } from '/audio.js';
     }
     window.__NEON_3D__={
       world:{map,WALL_HEIGHTS,GROUND_HEIGHT,MAP_W,MAP_H,STAIR_ZONES,enemyTypes:ENEMY_TYPES,weapons:WEAPONS},
-      frame:()=>({mode:state.mode,timeOfDay:state.timeOfDay,totalTime:state.totalTime,camera:state.camera||getRenderCamera(),player,enemies:state.enemies,cars:state.cars,corpses:state.corpses,bloodDecals:state.bloodDecals,brokenGlass:state.brokenGlass,projectiles:state.projectiles,pickups:state.pickups,particles:state.particles,muzzle:state.muzzle,melee:state.melee,screenShake:state.screenShake,fov:viewFov(),missionStage:state.missionStage,missionProgress:state.missionProgress,objectiveTarget:state.objectiveTarget,wavePhase:state.wavePhase,gore:state.gore,commander:state.commander}),
+      frame:()=>{threeFrame.mode=state.mode;threeFrame.timeOfDay=state.timeOfDay;threeFrame.totalTime=state.totalTime;threeFrame.camera=state.camera||getRenderCamera();threeFrame.player=player;threeFrame.enemies=state.enemies;threeFrame.cars=state.cars;threeFrame.corpses=state.corpses;threeFrame.bloodDecals=state.bloodDecals;threeFrame.brokenGlass=state.brokenGlass;threeFrame.projectiles=state.projectiles;threeFrame.pickups=state.pickups;threeFrame.particles=state.particles;threeFrame.muzzle=state.muzzle;threeFrame.melee=state.melee;threeFrame.screenShake=state.screenShake;threeFrame.fov=viewFov();threeFrame.missionStage=state.missionStage;threeFrame.missionProgress=state.missionProgress;threeFrame.objectiveTarget=state.objectiveTarget;threeFrame.wavePhase=state.wavePhase;threeFrame.gore=state.gore;threeFrame.commander=state.commander;return threeFrame;},
       ready:(options={})=>{state.threeReady=!options.fallback;if(state.threeReady)document.body.classList.add('three-ready');else document.body.classList.add('three-fallback');},
       fail:(error)=>{state.threeReady=false;const screen=$('webglErrorScreen'),text=$('webglErrorText');if(text&&error)text.textContent=`The 3D renderer could not start (${String(error.message||error).slice(0,140)}). Update your browser or enable hardware acceleration to continue.`;screen?.classList.remove('hidden');}
     };
     const webglProbe=document.createElement('canvas');
     let webgl2Available=false;try{webgl2Available=!!webglProbe.getContext('webgl2');}catch{}
-    if(webgl2Available)import('/scene3d.js').catch(error=>window.__NEON_3D__.fail(error));
+    if(compatibilityMode)window.__NEON_3D__.ready({fallback:true});
+    else if(webgl2Available)import('/scene3d.js').catch(error=>window.__NEON_3D__.fail(error));
     else window.__NEON_3D__.fail(new Error('WebGL2 context unavailable'));
     if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
     let preferredTime='day',preferredAutoLock=true,preferredGore=true,preferredOperation=0;try{preferredTime=localStorage.getItem('neon-breach-time')||'day';preferredAutoLock=localStorage.getItem('neon-breach-auto-lock')!=='off';preferredGore=localStorage.getItem('neon-breach-gore')!=='off';preferredOperation=Number(localStorage.getItem('neon-breach-operation')||0);}catch{}setMissionTime(preferredTime,false);setAutoLock(preferredAutoLock,false,false);setGore(preferredGore,false);setOperation(preferredOperation,false);renderArsenal();updateBestScore();loadCampaignRecords();initAssets();resize();setupTouch();render();requestAnimationFrame(frame);

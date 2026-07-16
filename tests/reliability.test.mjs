@@ -34,3 +34,13 @@ test('WebGL2 failures have a visible recovery screen without changing input bind
   assert.match(source, /ShiftLeft.*shiftFire/);
   assert.match(source, /gamepadFire/);
 });
+
+test('genuine WebGL2 mode always runs Three.js and compatibility mode is explicit', async () => {
+  const scene = await readFile('public/scene3d.js', 'utf8');
+  const game = await readFile('public/game.js', 'utf8');
+  assert.match(scene, /renderer\.setAnimationLoop\(animate\)/);
+  assert.match(scene, /window\.__NEON_RENDER_STATS__/);
+  assert.match(scene, /try \{ lowPreset \|\|= localStorage/);
+  assert.match(game, /renderer.*=== 'compat'/);
+  assert.doesNotMatch(scene, /if \(lowPreset\) bridge\.ready\(\{ fallback: true \}\)/);
+});
