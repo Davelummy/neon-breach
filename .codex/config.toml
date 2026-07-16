@@ -61,7 +61,7 @@ default_tools_approval_mode = "prompt"
 command = "uvx"
 args = ["elevenlabs-mcp"]
 env_vars = ["ELEVENLABS_API_KEY", "ELEVENLABS_MCP_BASE_PATH", "ELEVENLABS_MCP_OUTPUT_MODE"]
-enabled = false
+enabled = true
 required = false
 startup_timeout_sec = 60
 tool_timeout_sec = 600
@@ -72,7 +72,7 @@ default_tools_approval_mode = "prompt"
 [mcp_servers.sentry]
 url = "https://mcp.sentry.dev/mcp"
 auth = "oauth"
-enabled = false
+enabled = true
 required = false
 tool_timeout_sec = 120
 default_tools_approval_mode = "writes"
@@ -93,7 +93,7 @@ default_tools_approval_mode = "prompt"
 [mcp_servers.posthog]
 url = "https://mcp.posthog.com/mcp"
 auth = "oauth"
-enabled = false
+enabled = true
 required = false
 tool_timeout_sec = 120
 default_tools_approval_mode = "writes"
@@ -102,9 +102,9 @@ default_tools_approval_mode = "writes"
 # are configured and the two environment variables are set locally.
 [mcp_servers.sonarqube]
 command = "docker"
-args = ["run", "--init", "--pull=always", "--rm", "-i", "-e", "SONARQUBE_TOKEN", "-e", "SONARQUBE_ORG", "sonarsource/sonarqube-mcp"]
+args = ["run", "--init", "--pull=always", "--rm", "-i", "-e", "SONARQUBE_TOKEN", "-e", "SONARQUBE_ORG", "-e", "SONARQUBE_READ_ONLY=true", "-e", "TELEMETRY_DISABLED=true", "-e", "SONARQUBE_LOG_TO_FILE_DISABLED=true", "-e", "SONARQUBE_TOOLSETS=analysis,issues,quality-gates,rules,measures,security-hotspots,duplications,coverage", "sonarsource/sonarqube-mcp"]
 env_vars = ["SONARQUBE_TOKEN", "SONARQUBE_ORG"]
-enabled = false
+enabled = true
 required = false
 startup_timeout_sec = 120
 tool_timeout_sec = 300
