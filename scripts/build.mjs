@@ -153,6 +153,8 @@ const handler = {
       catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'Leaderboard service failed.' }, { status: 500 }); }
     }
 
+    if (url.pathname.startsWith('/api/')) return Response.json({ error: 'API route not found.' }, { status: 404 });
+
     const asset = assets[url.pathname];
     if (asset) {
       return new Response(asset.body, {

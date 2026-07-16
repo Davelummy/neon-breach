@@ -40,6 +40,7 @@
     #threeGame { position: fixed; inset: 0; z-index: 0; width: 100%; height: 100%; display: block; pointer-events: none; background: #05070c; }
     body.three-ready #game { opacity: 0; background: transparent; }
     .hidden { display: none !important; }
+    #webglErrorScreen { z-index: 40; background: rgba(2,5,9,.96); }
 
     #fx, #damageFlash, #pickupFlash, #shieldFx, #armorFx, .screen-overlay { position: fixed; inset: 0; pointer-events: none; }
     #fx {
@@ -403,6 +404,15 @@
     </div>
   </section>
 
+  <section id="webglErrorScreen" class="screen hidden" role="alert" aria-live="assertive">
+    <div class="modal">
+      <div class="eyebrow" style="justify-content:center">RENDERER FAULT</div>
+      <h2>WEBGL2 UNAVAILABLE</h2>
+      <p id="webglErrorText">The 3D renderer could not start. Update your browser or enable hardware acceleration to continue.</p>
+      <button class="secondary" onclick="location.reload()">Retry renderer</button>
+    </div>
+  </section>
+
   <div id="touchControls" class="hidden">
     <div id="joystickZone"><div id="joystickBase"></div><div id="joystickKnob"></div></div>
     <div id="lookZone"></div>
@@ -417,6 +427,5 @@
   <div id="rotatePrompt"><div><b>↻</b><span>Rotate your device to landscape<br>for the full combat interface.</span></div></div>
 
   <script type="module" src="/game.js"></script>
-  <script type="module" src="/scene3d.js"></script>
 </body>
 </html>

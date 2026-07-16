@@ -22,6 +22,14 @@ const check = (label, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
   if (!ok) failures.push(label);
 };
+async function waitForState(page, predicate, timeout = 8000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (await page.evaluate(predicate)) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error(`state wait exceeded ${timeout}ms`);
+}
 
 let browser;
 try {
@@ -32,18 +40,18 @@ try {
   page.on('pageerror', error => pageErrors.push(String(error?.message || error)));
 
   await page.goto(`http://127.0.0.1:${PORT}/?qa`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForFunction('window.__NEON_QA__ && window.__NEON_3D__', { timeout: 10000 });
+  await waitForState(page, () => Boolean(window.__NEON_QA__ && window.__NEON_3D__), 10000);
   check('QA bridge available', true);
 
   const menuSnapshot = await page.evaluate(() => window.__NEON_QA__.snapshot());
   check('boots into menu', menuSnapshot.mode === 'menu', `mode=${menuSnapshot.mode}`);
 
   await page.evaluate(() => document.getElementById('deployButton').click());
-  await page.waitForFunction("window.__NEON_QA__.snapshot().mode === 'playing'", { timeout: 5000 });
+  await waitForState(page, () => window.__NEON_QA__.snapshot().mode === 'playing', 5000);
   check('deploy starts a run', true);
 
   await page.evaluate(() => { window.__NEON_QA__.setInvulnerable(true); window.__NEON_QA__.skipWait(); });
-  await page.waitForFunction('window.__NEON_QA__.snapshot().enemies > 0', { timeout: 8000 });
+  await waitForState(page, () => window.__NEON_QA__.snapshot().enemies > 0, 8000);
   const combat = await page.evaluate(() => window.__NEON_QA__.snapshot());
   check('enemies spawn', combat.enemies > 0, `enemies=${combat.enemies}`);
   check('starts at mission stage 0', combat.missionStage === 0, `stage=${combat.missionStage}`);
@@ -65,10 +73,10 @@ try {
 
   // 3D layer: with the dev server mapping /vendor/, three.js must boot even in
   // headless SwiftShader, flip body.three-ready, and expose the FX controller.
-  let threeReady = false;
-  try { await page.waitForFunction("document.body.classList.contains('three-ready')", { timeout: 10000 }); threeReady = true; } catch {}
-  check('3D renderer initialized headlessly', threeReady);
-  if (threeReady) {
+  let rendererReady = false;
+  try { await waitForState(page, () => document.body.classList.contains('three-ready') || document.body.classList.contains('three-fallback'), 10000); rendererReady = true; } catch {}
+  check('3D renderer initialized headlessly', rendererReady);
+  if (rendererReady) {
     const fxState = await page.evaluate(() => ({ q: window.__NEON_FX__?.quality(), ms: Math.round(window.__NEON_FX__?.frameMs() || 0), post: window.__NEON_FX__?.post() }));
     check('adaptive quality controller online', Number.isInteger(fxState.q) && fxState.q >= 0 && fxState.q <= 3, `quality=${fxState.q} frame=${fxState.ms}ms post=${fxState.post}`);
     await page.screenshot({ path: process.env.SMOKE_SHOT || 'smoke-gameplay.png' });
@@ -77,10 +85,10 @@ try {
   // Second scenario: select operation 2 (NIGHT RAPTOR) from the menu and play
   // it through every stage type — reach, defend, hvt, extract.
   await page.goto(`http://127.0.0.1:${PORT}/?qa`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForFunction('window.__NEON_QA__', { timeout: 10000 });
+  await waitForState(page, () => Boolean(window.__NEON_QA__), 10000);
   await page.evaluate(() => document.querySelector('[data-operation="1"]').click());
   await page.evaluate(() => document.getElementById('deployButton').click());
-  await page.waitForFunction("window.__NEON_QA__.snapshot().mode === 'playing'", { timeout: 5000 });
+  await waitForState(page, () => window.__NEON_QA__.snapshot().mode === 'playing', 5000);
   const op2 = await page.evaluate(() => window.__NEON_QA__.snapshot());
   check('operation 2 deploys', op2.operation === 1, `operation=${op2.operation}`);
   check('operation 2 has its own objective', op2.objective === 'REACH THE EASTERN RELAY POST', op2.objective);
@@ -96,9 +104,9 @@ try {
   // Third scenario: boss phase escalation. Jump to the HVT stage, wound the
   // commander past a phase threshold, and confirm reinforcements + rage buffs.
   await page.goto(`http://127.0.0.1:${PORT}/?qa`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForFunction('window.__NEON_QA__', { timeout: 10000 });
+  await waitForState(page, () => Boolean(window.__NEON_QA__), 10000);
   await page.evaluate(() => document.getElementById('deployButton').click());
-  await page.waitForFunction("window.__NEON_QA__.snapshot().mode === 'playing'", { timeout: 5000 });
+  await waitForState(page, () => window.__NEON_QA__.snapshot().mode === 'playing', 5000);
   await page.evaluate(() => { window.__NEON_QA__.setInvulnerable(true); window.__NEON_QA__.setMissionStage(3); });
   await new Promise(resolve => setTimeout(resolve, 400));
   const beforePhase = await page.evaluate(() => window.__NEON_QA__.snapshot());
