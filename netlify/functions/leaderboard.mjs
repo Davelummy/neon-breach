@@ -1,26 +1,20 @@
 /**
- * Shared party leaderboard for Netlify (family / friends worldwide).
- * Storage: Netlify Blobs — no database setup required.
+ * Shared party / world leaderboard (Netlify Blobs).
+ * Works for everyone on the public URL — no login, no database setup.
  */
 import { getStore } from '@netlify/blobs';
 
 const MAX_BOARD = 50;
-const STORE = 'neon-breach-party-board';
+const STORE_NAME = 'neon-breach-party-board';
 const KEY = 'entries';
 
-const cors = {
+const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'content-type, accept',
-  'Cache-Control': 'no-store'
+  'Cache-Control': 'no-store',
+  'Content-Type': 'application/json; charset=utf-8'
 };
-
-function json(body, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', ...cors }
-  });
-}
 
 function sanitizeCallsign(value) {
   const clean = String(value || '')
@@ -53,6 +47,20 @@ function ranked(board) {
     }));
 }
 
+function openStore() {
+  // Prefer automatic Netlify runtime config; fall back to explicit env if present.
+  try {
+    return getStore({ name: STORE_NAME, consistency: 'strong' });
+  } catch {
+    const siteID = process.env.SITE_ID || process.env.NETLIFY_SITE_ID;
+    const token = process.env.NETLIFY_BLOBS_TOKEN || process.env.NETLIFY_API_TOKEN;
+    if (siteID && token) {
+      return getStore({ name: STORE_NAME, siteID, token, consistency: 'strong' });
+    }
+    throw new Error('Netlify Blobs is not configured for this site yet.');
+  }
+}
+
 async function loadBoard(store) {
   try {
     const data = await store.get(KEY, { type: 'json' });
@@ -62,60 +70,51 @@ async function loadBoard(store) {
   }
 }
 
-export async function handler(event) {
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 204, headers: cors, body: '' };
+export default async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   let store;
   try {
-    store = getStore({ name: STORE, consistency: 'strong' });
+    store = openStore();
   } catch (error) {
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json', ...cors },
-      body: JSON.stringify({
+    return new Response(
+      JSON.stringify({
         available: false,
         error: 'Cloud board warming up — scores still save on your device.',
         detail: String(error?.message || error)
-      })
-    };
+      }),
+      { status: 200, headers: corsHeaders }
+    );
   }
 
-  if (event.httpMethod === 'GET') {
+  if (req.method === 'GET') {
     const board = await loadBoard(store);
     const entries = ranked(board);
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json', ...cors },
-      body: JSON.stringify({
-        available: true,
-        source: 'netlify',
-        entries,
-        count: entries.length
-      })
-    };
+    return new Response(
+      JSON.stringify({ available: true, source: 'netlify', entries, count: entries.length }),
+      { status: 200, headers: corsHeaders }
+    );
   }
 
-  if (event.httpMethod === 'POST') {
+  if (req.method === 'POST') {
     let body = {};
     try {
-      body = JSON.parse(event.body || '{}');
+      body = await req.json();
     } catch {
-      return {
-        statusCode: 400,
-        headers: { 'Content-Type': 'application/json', ...cors },
-        body: JSON.stringify({ error: 'Invalid JSON body.' })
-      };
+      return new Response(JSON.stringify({ error: 'Invalid JSON body.' }), {
+        status: 400,
+        headers: corsHeaders
+      });
     }
 
     const score = Math.max(0, Math.min(9_999_999, Math.floor(Number(body.score) || 0)));
     if (score <= 0) {
-      return {
-        statusCode: 400,
-        headers: { 'Content-Type': 'application/json', ...cors },
-        body: JSON.stringify({ error: 'Score must be positive.' })
-      };
+      return new Response(JSON.stringify({ error: 'Score must be positive.' }), {
+        status: 400,
+        headers: corsHeaders
+      });
     }
 
     const entry = {
@@ -146,22 +145,25 @@ export async function handler(event) {
         Math.abs((row.at || 0) - entry.at) < 5000
     );
 
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json', ...cors },
-      body: JSON.stringify({
+    return new Response(
+      JSON.stringify({
         available: true,
         source: 'netlify',
         ok: true,
         rank: mine >= 0 ? mine + 1 : null,
         entries
-      })
-    };
+      }),
+      { status: 200, headers: corsHeaders }
+    );
   }
 
-  return {
-    statusCode: 405,
-    headers: { 'Content-Type': 'application/json', Allow: 'GET, POST, OPTIONS', ...cors },
-    body: JSON.stringify({ error: 'Method not allowed.' })
-  };
-}
+  return new Response(JSON.stringify({ error: 'Method not allowed.' }), {
+    status: 405,
+    headers: { ...corsHeaders, Allow: 'GET, POST, OPTIONS' }
+  });
+};
+
+// Netlify Functions 2.0 — direct path (also mirrored by netlify.toml redirects)
+export const config = {
+  path: '/api/leaderboard'
+};
