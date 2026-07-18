@@ -8,12 +8,16 @@
     "build": "node scripts/build.mjs",
     "test": "node --test tests/*.test.mjs",
     "qa": "node scripts/qa-smoke.mjs",
+    "verify": "npm test && npm run qa",
     "blender:check": "node scripts/blender/run-healthcheck.mjs",
     "mcp:check": "node scripts/check-mcp-prereqs.mjs",
-    "start": "node scripts/serve.mjs",
-    "db:generate": "drizzle-kit generate"
+    "start": "SERVE_DIST=1 node scripts/serve.mjs --dist",
+    "db:generate": "drizzle-kit generate",
+    "netlify:build": "npm run build",
+    "netlify:deploy": "npm run build && npx --yes netlify-cli deploy --prod"
   },
   "dependencies": {
+    "@netlify/blobs": "^10.7.9",
     "drizzle-orm": "0.45.2",
     "three": "^0.180.0"
   },

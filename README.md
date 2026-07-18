@@ -4,7 +4,20 @@ A playable 3D browser FPS with a three-operation campaign, six enemy archetypes 
 
 ## Play
 
-**[Launch NEON BREACH — Build 4.1](https://neon-breach-ares-07.davelummy.chatgpt.site)**
+**Host for family & friends (recommended):** see **[DEPLOY-NETLIFY.md](./DEPLOY-NETLIFY.md)** — one public link, shared world leaderboard.
+
+```bash
+npm install
+npm run build
+npx netlify-cli deploy --prod   # after netlify login / init
+```
+
+**Local:**
+
+```bash
+npm run dev
+# open the Network URL printed in the terminal for same-Wi‑Fi play
+```
 
 ## Campaign operations
 
@@ -87,10 +100,23 @@ npm start
 ## Testing
 
 ```bash
-npm test    # node:test suite — mission/enemy data invariants, save validation, path safety
-npm run qa  # headless gameplay smoke test (chrome-headless-shell): boots the game,
-            # plays operations end to end, triggers boss phases, checks the 3D renderer
+npm test       # node:test suite — mission/enemy data invariants, save validation, path safety
+npm run qa     # headless gameplay smoke (chrome-headless-shell)
+npm run verify # test + qa
 ```
+
+Full local matrix (manual + automated): [`docs/local-test-plan.md`](docs/local-test-plan.md)  
+Roadmap to 10/10: [`docs/ten-out-of-ten-plan.md`](docs/ten-out-of-ten-plan.md)
+
+### Gameplay systems (Build 5.0)
+
+- Boss phase **abilities** + mid-fight pulses: shockwave / cloak / slam
+- **Destroy** stage (vault relays) + 3D relay markers
+- **Role silhouette FX** (sniper glint, shield arc, dash trail, charge ring)
+- **Op-specific rules** (`OP_RULES`): Night Raptor forced night + stealth, Iron Harvest vehicle stage + layout patches, First Strike open routes
+- **Finisher camera** with letterbox (longer for commanders)
+- **Medals** + career rack; **Daily challenge** modifiers (UTC seed)
+- Expanded **perks**, combat hitstop, multi-step tutorial
 
 ## Technology
 

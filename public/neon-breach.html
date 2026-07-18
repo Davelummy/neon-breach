@@ -4,14 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <meta name="theme-color" content="#05070c">
+  <meta name="description" content="NEON BREACH — a free browser tactical FPS. Party leaderboard, gamepad support, three operations. Play with family & friends on the same Wi‑Fi.">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Neon Breach">
+  <meta property="og:title" content="NEON BREACH — Browser Tactical FPS">
+  <meta property="og:description" content="Infiltrate. Breach. Extract. Challenge friends on the party board — no install, no account.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="/icon.svg">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="NEON BREACH">
+  <meta name="twitter:description" content="Free browser FPS with party ranks. Play with family on Wi‑Fi.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/icon.svg">
-  <title>NEON BREACH — Web FPS</title>
+  <title>NEON BREACH — Free Browser FPS</title>
   <style>
     :root {
       --ink: #eefcff;
@@ -38,7 +46,10 @@
     button { font: inherit; }
     #game { position: fixed; inset: 0; z-index: 1; width: 100%; height: 100%; image-rendering: auto; background: #05070c; transition: opacity .25s ease; }
     #threeGame { position: fixed; inset: 0; z-index: 0; width: 100%; height: 100%; display: block; pointer-events: none; background: #05070c; }
-    body.three-ready #game { opacity: 0; background: transparent; }
+    /* Keep the 2D canvas as an invisible input target above the Three.js layer.
+       Opacity 0 still receives clicks/pointer-lock; never use pointer-events:none here. */
+    body.three-ready #game { opacity: 0; background: transparent; pointer-events: auto; z-index: 2; }
+    body.three-ready #threeGame { z-index: 1; }
     .hidden { display: none !important; }
     #webglErrorScreen { z-index: 40; background: rgba(2,5,9,.96); }
 
@@ -51,13 +62,64 @@
       mix-blend-mode: normal;
     }
     #damageFlash { z-index: 8; opacity: 0; background: radial-gradient(circle, transparent 25%, rgba(255,31,68,.82)); transition: opacity .11s; }
+    /* Low vitals — subtle peripheral red pulse while critically wounded */
+    body.low-vitals #fx {
+      box-shadow: inset 0 0 120px rgba(180, 20, 40, .35), inset 0 0 40px rgba(120, 0, 20, .25);
+    }
+    body.low-vitals #crosshair { filter: saturate(1.2) hue-rotate(-8deg); }
     #pickupFlash { z-index: 7; opacity: 0; background: radial-gradient(circle, rgba(49,245,219,.22), transparent 68%); transition: opacity .18s; }
     #shieldFx { z-index: 7; opacity: 0; background: radial-gradient(circle at 50% 50%, transparent 40%, rgba(49,245,219,.16) 62%, rgba(72,155,255,.7) 100%), repeating-linear-gradient(60deg, transparent 0 30px, rgba(85,224,255,.12) 31px 32px); mix-blend-mode: screen; transition: opacity .12s; }
     #shieldFx::after { content: ""; position: absolute; inset: 7%; border: 1px solid rgba(111,235,255,.25); border-radius: 46%; box-shadow: inset 0 0 65px rgba(80,210,255,.16), 0 0 25px rgba(49,245,219,.15); }
     #armorFx { z-index: 6; opacity: 0; background: radial-gradient(circle, transparent 48%, rgba(22,18,16,.32) 72%, rgba(0,0,0,.82) 100%); transition: opacity .3s; }
-    #letterboxTop, #letterboxBottom { position: fixed; left: 0; right: 0; height: max(4px, .55vh); z-index: 3; background: rgba(49,245,219,.6); box-shadow: 0 0 18px rgba(49,245,219,.45); pointer-events: none; }
+    #letterboxTop, #letterboxBottom { position: fixed; left: 0; right: 0; height: 0; z-index: 9; background: #020307; pointer-events: none; transition: height .18s ease; opacity: .92; }
+    #letterboxTop.show, #letterboxBottom.show { height: max(48px, 9vh); box-shadow: 0 0 24px rgba(49,245,219,.25); }
     #letterboxTop { top: 0; }
     #letterboxBottom { bottom: 0; }
+
+    /* Night ops NVG — bright green phosphor (readable, not crushed black). */
+    #nvgOverlay {
+      position: fixed; inset: 0; z-index: 4; pointer-events: none; opacity: 0;
+      transition: opacity .2s ease;
+      background:
+        radial-gradient(ellipse at 50% 48%, rgba(90, 255, 150, .14) 0%, transparent 55%, rgba(0, 28, 12, .28) 88%, rgba(0, 10, 4, .45) 100%),
+        linear-gradient(180deg, rgba(20, 90, 45, .12), rgba(0, 30, 14, .08));
+      mix-blend-mode: soft-light;
+    }
+    #nvgOverlay.show { opacity: 1; }
+    #nvgOverlay::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      /* Soft goggle mask — light falloff only, no heavy black crush */
+      background: radial-gradient(circle at 50% 48%, transparent 58%, rgba(0, 12, 6, .22) 100%);
+    }
+    #nvgOverlay::after {
+      content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .12;
+      background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0, 40, 18, .15) 2px 3px);
+    }
+    /* Bright phosphor grade on the 3D canvas */
+    body.nvg-active #threeGame {
+      filter: brightness(1.38) contrast(1.12) saturate(.45) hue-rotate(72deg);
+    }
+    body.nvg-active #fx {
+      background: radial-gradient(circle at 50% 44%, transparent 40%, rgba(0, 40, 18, .18) 78%, rgba(0, 8, 4, .35) 115%);
+    }
+    body.nvg-active #hud { filter: brightness(1.08) hue-rotate(40deg) saturate(.7); }
+    #nvgBadge {
+      position: fixed; top: 92px; left: 24px; z-index: 6; pointer-events: none;
+      display: none; align-items: center; gap: 8px;
+      padding: 6px 10px; border: 1px solid rgba(80, 255, 140, .45);
+      background: rgba(2, 18, 10, .72); color: #7dffb0;
+      font: 800 8px/1 ui-monospace, monospace; letter-spacing: .2em;
+      box-shadow: 0 0 16px rgba(40, 255, 120, .15);
+    }
+    #nvgBadge.show { display: flex; }
+    #nvgBadge i {
+      width: 7px; height: 7px; border-radius: 50%; background: #4dff9a;
+      box-shadow: 0 0 8px #4dff9a; animation: nvg-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes nvg-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .35; }
+    }
 
     #hud { position: fixed; inset: 0; z-index: 5; pointer-events: none; text-shadow: 0 1px 8px #000; }
     .hud-panel {
@@ -280,25 +342,324 @@
 
     @media (pointer: coarse) { .desktop-only { display: none; } }
     @media (orientation: portrait) and (pointer: coarse) { #rotatePrompt { display: grid; } }
+
+    /* —— Multi-screen menu flow —— */
+    #bootSplash {
+      position: fixed; inset: 0; z-index: 40; display: grid; place-items: center;
+      background: #020507; transition: opacity .55s ease, visibility .55s ease;
+    }
+    #bootSplash.hide { opacity: 0; visibility: hidden; pointer-events: none; }
+    #bootSplash .splash-inner { text-align: center; animation: splash-in 1.1s ease both; }
+    #bootSplash .splash-mark {
+      width: 56px; height: 56px; margin: 0 auto 18px; border-radius: 14px;
+      background: linear-gradient(145deg, #31f5db, #1a8f9a); box-shadow: 0 0 40px rgba(49,245,219,.35);
+      display: grid; place-items: center; font: 1000 22px/1 ui-sans-serif; color: #03100f;
+    }
+    #bootSplash b { display: block; font-size: 13px; letter-spacing: .42em; color: #eefcff; font-weight: 800; }
+    #bootSplash span { display: block; margin-top: 10px; color: #6f8a92; font-size: 10px; letter-spacing: .28em; }
+    @keyframes splash-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+    #menuRoot {
+      z-index: 20;
+      overflow: hidden;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% 20%, rgba(49,245,219,.08), transparent 55%),
+        radial-gradient(ellipse 50% 40% at 80% 80%, rgba(166,108,255,.07), transparent 50%),
+        radial-gradient(ellipse 40% 50% at 15% 70%, rgba(255,83,109,.05), transparent 45%),
+        linear-gradient(180deg, #040a10 0%, #071018 50%, #050b10 100%);
+    }
+    #menuRoot.hidden { display: none !important; }
+
+    /* Animated menu stage — grid + orbs (CSS only, cheap) */
+    #menuMotion {
+      position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+    }
+    #menuMotion .grid {
+      position: absolute; inset: -20%;
+      background-image:
+        linear-gradient(rgba(49,245,219,.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(49,245,219,.06) 1px, transparent 1px);
+      background-size: 48px 48px;
+      transform: perspective(500px) rotateX(58deg) translateY(-8%);
+      animation: grid-drift 22s linear infinite;
+      opacity: .55;
+      mask-image: linear-gradient(180deg, transparent, #000 25%, #000 70%, transparent);
+    }
+    @keyframes grid-drift {
+      from { background-position: 0 0, 0 0; }
+      to { background-position: 0 48px, 48px 0; }
+    }
+    #menuMotion .orb {
+      position: absolute; border-radius: 50%; filter: blur(2px);
+      animation: orb-float 12s ease-in-out infinite;
+      opacity: .55;
+    }
+    #menuMotion .orb.a {
+      width: 220px; height: 220px; left: -40px; top: 18%;
+      background: radial-gradient(circle, rgba(49,245,219,.35), transparent 68%);
+      animation-duration: 14s;
+    }
+    #menuMotion .orb.b {
+      width: 280px; height: 280px; right: -60px; bottom: 10%;
+      background: radial-gradient(circle, rgba(166,108,255,.32), transparent 68%);
+      animation-duration: 18s; animation-delay: -4s;
+    }
+    #menuMotion .orb.c {
+      width: 160px; height: 160px; left: 42%; top: 8%;
+      background: radial-gradient(circle, rgba(255,187,85,.22), transparent 70%);
+      animation-duration: 11s; animation-delay: -2s;
+    }
+    @keyframes orb-float {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      33% { transform: translate(18px, -22px) scale(1.06); }
+      66% { transform: translate(-14px, 12px) scale(.96); }
+    }
+    #menuMotion .scan {
+      position: absolute; left: 0; right: 0; height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(49,245,219,.45), transparent);
+      animation: scan-sweep 5.5s ease-in-out infinite;
+      opacity: .5;
+    }
+    @keyframes scan-sweep {
+      0% { top: 8%; opacity: 0; }
+      10% { opacity: .55; }
+      90% { opacity: .35; }
+      100% { top: 92%; opacity: 0; }
+    }
+    #menuMotion .spark {
+      position: absolute; width: 3px; height: 3px; border-radius: 50%;
+      background: #31f5db; box-shadow: 0 0 10px #31f5db;
+      animation: spark-rise 7s linear infinite;
+      opacity: 0;
+    }
+    @keyframes spark-rise {
+      0% { transform: translateY(20px); opacity: 0; }
+      12% { opacity: .9; }
+      100% { transform: translateY(-110vh); opacity: 0; }
+    }
+
+    .menu-screen {
+      display: none; width: min(520px, 100%); position: relative; z-index: 2;
+      margin: auto;
+    }
+    .menu-screen.active {
+      display: block;
+      animation: screen-in .38s cubic-bezier(.2,.8,.2,1);
+    }
+    @keyframes screen-in {
+      from { opacity: 0; transform: translateY(16px) scale(.98); filter: blur(4px); }
+      to { opacity: 1; transform: none; filter: none; }
+    }
+    .menu-panel {
+      padding: 28px 24px 22px; border: 1px solid rgba(134,230,223,.22);
+      background: linear-gradient(145deg, rgba(9,20,27,.92), rgba(4,10,15,.82));
+      box-shadow: 0 24px 70px rgba(0,0,0,.4), 0 0 0 1px rgba(49,245,219,.04);
+      backdrop-filter: blur(14px);
+      clip-path: polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px));
+      transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+      animation: panel-glow 4.5s ease-in-out infinite;
+    }
+    @keyframes panel-glow {
+      0%, 100% { box-shadow: 0 24px 70px rgba(0,0,0,.4), 0 0 24px rgba(49,245,219,.04); }
+      50% { box-shadow: 0 28px 80px rgba(0,0,0,.45), 0 0 40px rgba(49,245,219,.1); }
+    }
+    .menu-panel h2 { margin: 0 0 8px; font-size: clamp(28px,6vw,40px); font-style: italic; letter-spacing: -.04em; }
+    .menu-panel .sub { margin: 0 0 20px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .menu-stack { display: grid; gap: 10px; }
+    .menu-stack .primary, .menu-stack .secondary { width: 100%; }
+    .menu-stack > * {
+      animation: btn-in .45s cubic-bezier(.2,.8,.2,1) both;
+    }
+    .menu-stack > *:nth-child(1) { animation-delay: .04s; }
+    .menu-stack > *:nth-child(2) { animation-delay: .09s; }
+    .menu-stack > *:nth-child(3) { animation-delay: .14s; }
+    .menu-stack > *:nth-child(4) { animation-delay: .19s; }
+    .menu-stack > *:nth-child(5) { animation-delay: .24s; }
+    .menu-stack > *:nth-child(6) { animation-delay: .29s; }
+    @keyframes btn-in {
+      from { opacity: 0; transform: translateX(-12px); }
+      to { opacity: 1; transform: none; }
+    }
+    .primary, .secondary, .op-card {
+      transition: transform .18s ease, filter .18s ease, border-color .18s ease, box-shadow .18s ease !important;
+    }
+    .primary:hover, .secondary:hover, .op-card:hover {
+      transform: translateY(-2px) scale(1.01);
+    }
+    .primary:active, .secondary:active, .op-card:active {
+      transform: translateY(1px) scale(.99);
+    }
+    .nav-row { display: flex; gap: 8px; margin-top: 16px; }
+    .nav-row .secondary { flex: 1; margin-top: 0; }
+    .setting-row {
+      display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;
+      padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,.07);
+    }
+    .setting-row:last-child { border-bottom: 0; }
+    .setting-row label { color: var(--ink); font-size: 12px; font-weight: 700; }
+    .setting-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+    .setting-row input[type=range] { width: 120px; accent-color: var(--cyan); }
+    .setting-row input[type=text] {
+      width: 140px; background: #0a141a; color: var(--ink); border: 1px solid rgba(255,255,255,.15);
+      padding: 8px 10px; font: 800 11px/1 ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase;
+    }
+    .title-hero { text-align: center; margin-bottom: 28px; position: relative; z-index: 2; }
+    .title-hero h1 {
+      font-size: clamp(52px,12vw,96px); margin: 0; transform: skew(-2deg);
+      animation: title-bob 5s ease-in-out infinite;
+      text-shadow: 0 0 40px rgba(49,245,219,.15);
+    }
+    @keyframes title-bob {
+      0%, 100% { transform: skew(-2deg) translateY(0); }
+      50% { transform: skew(-2deg) translateY(-6px); }
+    }
+    .title-hero h1 em {
+      color: transparent; -webkit-text-stroke: 1px var(--cyan);
+      animation: em-pulse 3.2s ease-in-out infinite;
+    }
+    @keyframes em-pulse {
+      0%, 100% { -webkit-text-stroke-color: var(--cyan); filter: drop-shadow(0 0 0 transparent); }
+      50% { -webkit-text-stroke-color: #7ffff0; filter: drop-shadow(0 0 12px rgba(49,245,219,.55)); }
+    }
+    .title-hero p { margin: 14px auto 0; max-width: 360px; color: #9bb0b7; font-size: 13px; line-height: 1.55; }
+    .title-hero .eyebrow {
+      animation: eyebrow-in .6s ease both;
+    }
+    @keyframes eyebrow-in {
+      from { opacity: 0; letter-spacing: .4em; }
+      to { opacity: 1; }
+    }
+    .op-card {
+      text-align: left; width: 100%; padding: 14px 14px; border: 1px solid rgba(255,255,255,.1);
+      background: rgba(255,255,255,.03); color: var(--ink); cursor: pointer;
+    }
+    .op-card:hover, .op-card.active { border-color: var(--cyan); background: rgba(49,245,219,.08); }
+    .op-card b { display: block; font-size: 13px; letter-spacing: .08em; }
+    .op-card span { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+    #menuRoot .difficulty, #menuRoot .time-select { margin-bottom: 8px; }
+    .scroll-panel { max-height: min(48vh, 360px); overflow: auto; margin-top: 8px; }
+    #version { left: 50%; transform: translateX(-50%); text-align: center; z-index: 3; }
+
+    /* Leaderboard rows */
+    .lb-row {
+      display: grid; grid-template-columns: 36px 1fr auto; gap: 10px; align-items: center;
+      padding: 10px 8px; border-bottom: 1px solid rgba(255,255,255,.06);
+      animation: lb-in .35s ease both;
+    }
+    .lb-row:nth-child(1) { animation-delay: .02s; }
+    .lb-row:nth-child(2) { animation-delay: .06s; }
+    .lb-row:nth-child(3) { animation-delay: .1s; }
+    .lb-row:nth-child(4) { animation-delay: .14s; }
+    .lb-row:nth-child(5) { animation-delay: .18s; }
+    @keyframes lb-in {
+      from { opacity: 0; transform: translateX(-8px); }
+      to { opacity: 1; transform: none; }
+    }
+    .lb-row.you { background: rgba(49,245,219,.08); border-color: rgba(49,245,219,.2); }
+    .lb-rank {
+      font: 1000 14px/1 ui-monospace, monospace; color: var(--cyan);
+      text-align: center;
+    }
+    .lb-row.top1 .lb-rank { color: #ffd257; text-shadow: 0 0 12px rgba(255,210,87,.5); }
+    .lb-row.top2 .lb-rank { color: #c8d4d8; }
+    .lb-row.top3 .lb-rank { color: #d08a5a; }
+    .lb-name { font: 800 12px/1.2 ui-sans-serif; letter-spacing: .08em; }
+    .lb-meta { display: block; margin-top: 3px; color: var(--muted); font: 700 9px/1.3 ui-monospace, monospace; letter-spacing: .06em; }
+    .lb-score { font: 1000 14px/1 ui-monospace, monospace; color: var(--ink); }
+    .share-row { display: flex; gap: 8px; margin-top: 12px; }
+    .share-row button { flex: 1; }
+
+    /* Gamepad / keyboard focus ring on menu controls */
+    .menu-focus, button.menu-focus, input.menu-focus, select.menu-focus {
+      outline: 2px solid var(--cyan) !important;
+      outline-offset: 3px;
+      box-shadow: 0 0 0 1px rgba(49,245,219,.35), 0 0 22px rgba(49,245,219,.28) !important;
+      border-color: var(--cyan) !important;
+      filter: brightness(1.08);
+      z-index: 1;
+      position: relative;
+    }
+    .primary.menu-focus { filter: brightness(1.14); }
+    .op-card.menu-focus { background: rgba(49,245,219,.12); }
+    @media (max-width: 760px) {
+      .menu-panel { padding: 22px 16px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #menuMotion .grid, #menuMotion .orb, #menuMotion .scan, #menuMotion .spark,
+      .title-hero h1, .title-hero h1 em, .menu-panel, .menu-stack > *, .lb-row {
+        animation: none !important;
+      }
+    }
+
+    /* First-run welcome + click gate */
+    #welcomeGate, #clickGate {
+      position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
+      background: rgba(2,5,9,.92); padding: 24px;
+    }
+    #clickGate { z-index: 45; cursor: pointer; }
+    #clickGate .gate-card, #welcomeGate .gate-card {
+      width: min(440px, 100%); padding: 28px 24px; text-align: center;
+      border: 1px solid rgba(49,245,219,.28);
+      background: linear-gradient(145deg, rgba(9,20,27,.96), rgba(4,10,15,.94));
+      box-shadow: 0 30px 80px rgba(0,0,0,.5), 0 0 40px rgba(49,245,219,.08);
+      clip-path: polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px));
+      animation: screen-in .4s ease both;
+    }
+    #clickGate h2, #welcomeGate h2 { margin: 0 0 10px; font-size: 28px; font-style: italic; }
+    #clickGate p, #welcomeGate p { margin: 0 0 18px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    #clickGate .pulse {
+      display: inline-block; margin-top: 4px; color: var(--cyan); font: 900 11px/1 ui-monospace, monospace;
+      letter-spacing: .22em; animation: gate-pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes gate-pulse { 0%,100%{opacity:.45} 50%{opacity:1} }
+    #welcomeGate .field { text-align: left; margin: 0 0 14px; }
+    #welcomeGate label { display: block; font-size: 10px; letter-spacing: .16em; color: var(--muted); font-weight: 800; margin-bottom: 6px; }
+    #welcomeGate input[type=text] {
+      width: 100%; background: #0a141a; color: var(--ink); border: 1px solid rgba(255,255,255,.15);
+      padding: 12px 12px; font: 800 14px/1 ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase;
+    }
+    #welcomeGate .chips { display: flex; gap: 8px; margin-bottom: 16px; }
+    #welcomeGate .chips button { flex: 1; padding: 10px 8px; font-size: 10px; letter-spacing: .1em; font-weight: 900; }
+    #welcomeGate .chips button.on { border-color: var(--cyan); color: var(--cyan); background: rgba(49,245,219,.1); }
+    #resultRank {
+      display: none; margin: 0 0 12px; padding: 10px 12px; text-align: center;
+      border: 1px solid rgba(49,245,219,.3); background: rgba(49,245,219,.08);
+      font: 900 12px/1.3 ui-monospace, monospace; letter-spacing: .14em; color: var(--cyan);
+    }
+    #resultRank.show { display: block; animation: screen-in .35s ease both; }
+    #resultRank b { display: block; font-size: 22px; color: #fff; margin-top: 4px; letter-spacing: .08em; }
+    .how-grid { display: grid; gap: 8px; margin: 0 0 16px; }
+    .how-row {
+      display: grid; grid-template-columns: 88px 1fr; gap: 10px; align-items: center;
+      padding: 10px 8px; border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .how-row kbd {
+      justify-self: start; padding: 5px 8px; border: 1px solid rgba(255,255,255,.15);
+      background: rgba(0,0,0,.35); font: 800 9px/1 ui-monospace, monospace; letter-spacing: .08em; color: var(--cyan);
+    }
+    .how-row span { color: var(--muted); font-size: 12px; line-height: 1.4; }
+
   </style>
 </head>
 <body>
   <canvas id="game" aria-label="NEON BREACH first-person shooter game"></canvas>
   <div id="fx"></div><div id="damageFlash"></div><div id="pickupFlash"></div><div id="shieldFx"></div><div id="armorFx"></div>
+  <div id="nvgOverlay" aria-hidden="true"></div>
+  <div id="nvgBadge"><i></i>NVG</div>
   <div id="letterboxTop"></div><div id="letterboxBottom"></div>
 
   <div id="hud" class="hidden">
     <div class="top-left">
       <div class="brand-mark"></div>
-      <div class="brand-lockup"><b>NEON BREACH</b><span>ARES // UNIT 07</span></div>
+      <div class="brand-lockup"><b>NEON BREACH</b><span>UNIT 07</span></div>
     </div>
     <div id="controllerStatus">DUALSENSE // SCANNING</div>
     <div id="objectiveBox" class="hud-panel">
       <div id="objectiveLabel" class="micro"><span id="waveLabel">BREACH 01 / 05</span><span id="enemyLabel">HOSTILES 00</span></div>
       <div id="waveTrack"><div id="waveFill"></div></div>
-      <div id="missionLabel">OBJECTIVE // HOLD THE ARES GRID</div>
+      <div id="missionLabel">OBJECTIVE</div>
     </div>
-    <div id="scoreBox"><div class="micro">TACTICAL SCORE</div><div id="scoreValue">000000</div><div id="killCount" class="micro">00 ELIMINATIONS</div></div>
+    <div id="scoreBox"><div class="micro">SCORE</div><div id="scoreValue">000000</div><div id="killCount" class="micro">00 ELIMINATIONS</div></div>
     <div id="radarWrap" class="hud-panel"><canvas id="radar" width="128" height="128"></canvas></div>
     <div class="bottom-left">
       <div class="status-row"><span class="status-label">VITALS</span><div class="bar"><i id="healthBar"></i></div><span id="healthValue" class="status-value">100</span></div>
@@ -308,101 +669,284 @@
     </div>
     <div class="bottom-right">
       <div id="weaponSlots"></div>
-      <div id="weaponName">VX-9 PULSE RIFLE // SHIFT FIRE // RMB ADS</div>
+      <div id="weaponName">VX-9 PULSE RIFLE</div>
       <div id="ammoLine"><span id="ammo">30</span><span id="reserve">/ 120</span></div>
       <div id="reloadTrack"><div id="reloadFill"></div></div>
     </div>
     <div id="scopeOverlay"><span id="zoomReadout">2.0X OPTIC</span></div>
     <div id="targetReadout">NO TARGET LOCK</div>
-    <div id="lockModeBadge">AUTO LOCK // ON · L1 / T</div>
+    <div id="lockModeBadge">AIM ASSIST ON</div>
     <div id="takedownFlash"></div>
     <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i></div>
-    <div id="vehicleHud">ARES INTERCEPTOR // △ EXIT</div>
+    <div id="vehicleHud">EXIT VEHICLE · E</div>
     <div id="hitMarker"></div>
     <div id="announcement"><strong>BREACH 01</strong><span>HOSTILE SIGNAL ACQUIRED</span></div>
-    <div id="missionComms"><b>ARES COMMAND</b><span>Stand by for mission telemetry.</span></div>
-    <div id="objectiveDistance">OBJECTIVE // 00M</div>
+    <div id="missionComms"><b>COMMAND</b><span>Stand by.</span></div>
+    <div id="objectiveDistance">00M</div>
     <div id="combo"><b>x2 CHAIN</b><small>ELIMINATION MULTIPLIER</small></div>
     <div id="message">PULSE MAGAZINE FULL</div>
   </div>
 
-  <section id="startScreen" class="screen">
+  <section id="bootSplash">
+    <div class="splash-inner">
+      <div class="splash-mark">LL</div>
+      <b>LUMMY LABS</b>
+      <span>PRESENTS</span>
+    </div>
+  </section>
+
+  <section id="menuRoot" class="screen hidden" data-menu="1">
+    <div id="menuMotion" aria-hidden="true">
+      <div class="grid"></div>
+      <div class="orb a"></div>
+      <div class="orb b"></div>
+      <div class="orb c"></div>
+      <div class="scan"></div>
+      <i class="spark" style="left:12%;animation-delay:0s"></i>
+      <i class="spark" style="left:28%;animation-delay:1.4s;background:#a66cff;box-shadow:0 0 10px #a66cff"></i>
+      <i class="spark" style="left:55%;animation-delay:2.8s"></i>
+      <i class="spark" style="left:72%;animation-delay:0.9s;background:#ffbb55;box-shadow:0 0 10px #ffbb55"></i>
+      <i class="spark" style="left:88%;animation-delay:3.6s"></i>
+    </div>
     <button id="audioButton" aria-label="Toggle audio">◉</button>
-    <div class="menu">
-      <div class="menu-copy">
-        <div class="eyebrow">A browser-native tactical FPS</div>
+
+    <div id="screenMain" class="menu-screen active">
+      <div class="title-hero">
+        <div class="eyebrow" style="justify-content:center">LUMMY LABS · TACTICAL FPS</div>
         <h1>NEON <em>BREACH</em></h1>
-        <p class="tagline">A cinematic true-3D tactical mission built for your PS5 controller. Infiltrate a hostile district, breach the data center, defend an uplink, eliminate the commander, and escape in an ARES interceptor.</p>
-        <div class="menu-kpis"><span>FIRST STRIKE VERTICAL SLICE</span><span>TACTICAL SQUAD AI</span><span>ADAPTIVE COMBAT SCORE</span></div>
+        <p>Infiltrate. Breach. Extract. Challenge friends on the party board.</p>
       </div>
-      <div class="menu-side">
-        <div class="menu-heading"><b>MISSION COMMAND</b><span>ARES GRID<br>SECTOR 07</span></div>
-        <div class="selection-label">Operation select</div>
-        <div class="op-select" id="opSelect"></div>
-        <div id="operationTagline" class="op-tagline">Infiltrate the district, steal the intel, burn out.</div>
-        <div class="selection-label">Operation conditions</div>
-        <div class="time-select">
-          <button class="active" data-time="day">DAYLIGHT</button>
-          <button data-time="night">NIGHT OPS</button>
-        </div>
-        <div class="mission-brief"><div id="missionClock" class="clock">13:40</div><div><b id="missionCondition">HIGH VISIBILITY</b><span id="missionBriefText">Clear sightlines, warm sunlight and longer combat range.</span></div></div>
-        <div class="selection-label">Threat profile</div>
-        <div class="difficulty">
-          <button data-difficulty="recruit">RECRUIT</button>
-          <button class="active" data-difficulty="operative">OPERATIVE</button>
-          <button data-difficulty="nightmare">NIGHTMARE</button>
-        </div>
-        <div class="aim-select"><span>Aim assistance<br>Toggle anytime with L1 or T</span><button id="autoLockButton" class="active" aria-pressed="true">AUTO LOCK // ON</button></div>
-        <div class="aim-select"><span>Combat effects<br>Blood and persistent aftermath</span><button id="goreButton" class="active" aria-pressed="true">GORE // ON</button></div>
-        <div class="menu-actions">
-          <button id="deployButton" class="primary">Begin First Strike</button>
-          <button id="continueButton" class="secondary hidden">Continue First Strike</button>
-        </div>
-        <div class="campaign-panel">
-          <div class="campaign-head"><div class="micro">Campaign record</div><span id="syncStatus">CONNECTING</span></div>
-          <div id="campaignHistory"><div class="campaign-row"><div><b>NO OPERATIONS RECORDED</b><span>Your campaign outcomes will appear here.</span></div><strong>—</strong></div></div>
-          <div id="bestScoreTitle" class="micro" style="margin-top:9px">BEST RUN // 000000</div>
-        </div>
-        <div class="campaign-panel">
-          <div class="campaign-head"><div class="micro">Arsenal &amp; perks</div><span id="careerStatus" class="micro">CAREER // 0 ELIMS</span></div>
-          <div id="arsenalRows"></div>
-        </div>
-        <div class="campaign-panel">
-          <div class="campaign-head"><div class="micro">Global ranking</div><span id="leaderboardStatus">CONNECTING</span></div>
-          <div id="leaderboardRows"><div class="campaign-row"><div><b>NO OPERATIVES RANKED</b><span>Top ARES operatives will appear here.</span></div><strong>—</strong></div></div>
-        </div>
-        <details class="controls-drawer desktop-only">
-          <summary>Controls and DualSense map</summary>
-          <div class="controls-grid">
-            <div class="control"><span>Move</span><kbd>WASD</kbd></div><div class="control"><span>Aim</span><kbd>MOUSE</kbd></div>
-            <div class="control"><span>Fire</span><kbd>SHIFT</kbd></div><div class="control"><span>Zoom</span><kbd>RMB</kbd></div>
-            <div class="control"><span>Reload</span><kbd>R</kbd></div><div class="control"><span>Sprint</span><kbd>Q</kbd></div>
-            <div class="control"><span>Jet</span><kbd>SPACE</kbd></div><div class="control"><span>Vehicle</span><kbd>E</kbd></div>
-            <div class="control"><span>Auto lock</span><kbd>T</kbd></div><div class="control"><span>PS5 auto lock</span><kbd>L1</kbd></div>
-          </div>
-          <div class="controller-help">PS5: L stick move · R stick camera · R2 fire · L2 zoom · L1 toggle auto lock · ✕ jet / boost · □ reload · R3 takedown · △ enter / exit vehicle · D-pad weapons · L3 sprint · Options pause</div>
-        </details>
+      <div class="menu-panel menu-stack">
+        <button class="primary" data-goto="screenOps">Play</button>
+        <button class="secondary" data-goto="screenRanks">Ranks</button>
+        <button class="secondary" data-goto="screenHow">How to play</button>
+        <button class="secondary" data-goto="screenRecords">Progress</button>
+        <button class="secondary" data-goto="screenSettings">Settings</button>
+        <button class="secondary" data-goto="screenControls">Controls</button>
+        <button id="inviteButton" class="secondary">Invite friends</button>
+        <button id="continueButton" class="secondary hidden">Continue</button>
       </div>
     </div>
-    <div id="version">FIRST STRIKE // BUILD 4.0 · FRIENDS &amp; FAMILY ALPHA</div>
+
+    <div id="screenHow" class="menu-screen">
+      <div class="menu-panel">
+        <h2>How to play</h2>
+        <p class="sub">30-second briefing. Then deploy on <b style="color:var(--cyan)">Recruit</b> if you’re new.</p>
+        <div class="how-grid">
+          <div class="how-row"><kbd>WASD</kbd><span>Move. <b>Q</b> sprint. Mouse looks (click the view first).</span></div>
+          <div class="how-row"><kbd>LMB / R2</kbd><span>Fire. <b>RMB / L2</b> aim down sights.</span></div>
+          <div class="how-row"><kbd>R / □</kbd><span>Reload. Empty mags auto-reload.</span></div>
+          <div class="how-row"><kbd>1–4</kbd><span>Switch weapons when unlocked.</span></div>
+          <div class="how-row"><kbd>F / R3</kbd><span>Finisher — close range, high score.</span></div>
+          <div class="how-row"><kbd>E / △</kbd><span>Enter / exit vehicles near extract.</span></div>
+          <div class="how-row"><kbd>Esc</kbd><span>Pause. Options on DualSense.</span></div>
+          <div class="how-row"><kbd>Pad</kbd><span>Menus: stick + Cross confirm, Circle back.</span></div>
+        </div>
+        <p class="sub" style="margin:0 0 12px">Goal: clear each phase, hit the objective marker, extract alive. Scores post to the <b>party board</b> for friends on this Wi‑Fi.</p>
+        <div class="nav-row">
+          <button class="secondary" data-goto="screenMain">Back</button>
+          <button class="primary" data-goto="screenOps" style="flex:1.4">Got it — play</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="screenOps" class="menu-screen">
+      <div class="menu-panel">
+        <h2>Operations</h2>
+        <p class="sub">Choose a mission.</p>
+        <div class="menu-stack" id="opSelect"></div>
+        <p id="operationTagline" class="op-tagline" style="margin:12px 0 0"></p>
+        <div class="nav-row">
+          <button class="secondary" data-goto="screenMain">Back</button>
+          <button class="primary" data-goto="screenDeploy" style="flex:1.4">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="screenDeploy" class="menu-screen">
+      <div class="menu-panel">
+        <h2>Deploy</h2>
+        <p class="sub" id="deployOpName">Ready for launch.</p>
+        <div class="selection-label">Conditions</div>
+        <div class="time-select">
+          <button class="active" data-time="day">Day</button>
+          <button data-time="night">Night</button>
+        </div>
+        <div class="mission-brief"><div id="missionClock" class="clock">13:40</div><div><b id="missionCondition">HIGH VISIBILITY</b><span id="missionBriefText">Clear sightlines and longer range.</span></div></div>
+        <div class="selection-label">Difficulty</div>
+        <div class="difficulty">
+          <button data-difficulty="recruit">Recruit</button>
+          <button class="active" data-difficulty="operative">Operative</button>
+          <button data-difficulty="nightmare">Nightmare</button>
+        </div>
+        <div class="campaign-panel" id="dailyPanel" style="margin-top:14px">
+          <div class="campaign-head"><div class="micro">Daily</div></div>
+          <div class="campaign-row"><div><b id="dailyTitle">Today</b><span id="dailyDesc">—</span></div></div>
+          <button id="dailyButton" class="secondary" style="width:100%;margin-top:8px">Daily challenge</button>
+        </div>
+        <div class="nav-row">
+          <button class="secondary" data-goto="screenOps">Back</button>
+          <button id="deployButton" class="primary" style="flex:1.6">Deploy</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="screenSettings" class="menu-screen">
+      <div class="menu-panel">
+        <h2>Settings</h2>
+        <p class="sub">Gameplay and audio.</p>
+        <div class="setting-row">
+          <div><label>Callsign</label><small>Name on the party leaderboard</small></div>
+          <input id="settingCallsign" type="text" maxlength="16" placeholder="OPERATIVE" autocomplete="nickname" spellcheck="false">
+        </div>
+        <div class="setting-row">
+          <div><label>Family mode</label><small>More health · gentler damage · stronger aim assist</small></div>
+          <button id="familyModeButton" aria-pressed="false">Off</button>
+        </div>
+        <div class="setting-row">
+          <div><label>Look sensitivity <span id="sensValue" style="color:var(--cyan)">100%</span></label><small>Mouse &amp; right stick</small></div>
+          <input id="settingSens" type="range" min="40" max="180" value="100" step="5">
+        </div>
+        <div class="setting-row">
+          <div><label>Invert look Y</label><small>Flight-sim style vertical look</small></div>
+          <button id="invertYButton" aria-pressed="false">Off</button>
+        </div>
+        <div class="setting-row">
+          <div><label>Master volume <span id="volumeValue" style="color:var(--cyan)">28%</span></label><small>Overall mix · 0% = silence (saved)</small></div>
+          <input id="settingVolume" type="range" min="0" max="100" value="28" step="1">
+        </div>
+        <div class="setting-row">
+          <div><label>Aim assist</label><small>Auto-lock (L1 / T in-game)</small></div>
+          <button id="autoLockButton" class="active" aria-pressed="true">On</button>
+        </div>
+        <div class="setting-row">
+          <div><label>Combat effects</label><small>Blood and aftermath</small></div>
+          <button id="goreButton" class="active" aria-pressed="true">On</button>
+        </div>
+        <div class="setting-row">
+          <div><label>Graphics quality</label><small>Auto scales; pin low if needed</small></div>
+          <select id="settingQuality" style="background:#0a141a;color:var(--ink);border:1px solid rgba(255,255,255,.15);padding:8px">
+            <option value="auto">Auto</option>
+            <option value="low">Low</option>
+          </select>
+        </div>
+        <div class="nav-row">
+          <button class="secondary" data-goto="screenMain">Back</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="screenRecords" class="menu-screen">
+      <div class="menu-panel">
+        <h2>Progress</h2>
+        <p class="sub">Career stats and unlocks.</p>
+        <div class="campaign-head"><div class="micro">Campaign</div><span id="syncStatus">…</span></div>
+        <div id="campaignHistory" class="scroll-panel"></div>
+        <div id="bestScoreTitle" class="micro" style="margin-top:10px">Best // 000000</div>
+        <div class="campaign-head" style="margin-top:16px"><div class="micro">Unlocks</div><span id="careerStatus" class="micro">0 elims</span></div>
+        <div id="arsenalRows" class="scroll-panel"></div>
+        <div class="campaign-head" style="margin-top:16px"><div class="micro">Medals</div></div>
+        <div id="medalRows" class="scroll-panel"></div>
+        <div class="nav-row">
+          <button class="secondary" data-goto="screenMain">Back</button>
+          <button class="primary" data-goto="screenRanks" style="flex:1.3">Open ranks</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="screenRanks" class="menu-screen">
+      <div class="menu-panel">
+        <h2>Party ranks</h2>
+        <p class="sub">Best scores on this device &amp; Wi‑Fi host. Set your callsign in Settings.</p>
+        <div class="campaign-head"><div class="micro">Leaderboard</div><span id="leaderboardStatus">…</span></div>
+        <div id="leaderboardRows" class="scroll-panel" style="max-height:min(52vh,420px)"></div>
+        <div class="share-row">
+          <button id="refreshRanksButton" class="secondary">Refresh</button>
+          <button id="shareInviteButton" class="primary">Share link</button>
+        </div>
+        <div class="nav-row">
+          <button class="secondary" data-goto="screenMain">Back</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="screenControls" class="menu-screen">
+      <div class="menu-panel">
+        <h2>Controls</h2>
+        <p class="sub">Keyboard and gamepad.</p>
+        <div class="controls-grid" style="display:grid;margin-top:0">
+          <div class="control"><span>Move</span><kbd>WASD</kbd></div>
+          <div class="control"><span>Look</span><kbd>Mouse</kbd></div>
+          <div class="control"><span>Fire</span><kbd>LMB</kbd></div>
+          <div class="control"><span>Aim</span><kbd>RMB</kbd></div>
+          <div class="control"><span>Reload</span><kbd>R</kbd></div>
+          <div class="control"><span>Sprint</span><kbd>Q</kbd></div>
+          <div class="control"><span>Jump / Jet</span><kbd>Space</kbd></div>
+          <div class="control"><span>Vehicle</span><kbd>E</kbd></div>
+          <div class="control"><span>Finisher</span><kbd>F</kbd></div>
+          <div class="control"><span>Aim assist</span><kbd>T</kbd></div>
+          <div class="control"><span>Pause</span><kbd>Esc</kbd></div>
+          <div class="control"><span>Weapons</span><kbd>1-4</kbd></div>
+        </div>
+        <p class="controller-help" style="margin-top:14px">Menu: stick / D-pad move · Cross / A confirm · Circle / B back · Options pause in-game<br>Combat: left stick move · right stick look · R2 fire · L2 aim · Options pause</p>
+        <div class="nav-row">
+          <button class="secondary" data-goto="screenMain">Back</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="version">Neon Breach · Lummy Labs</div>
   </section>
 
   <section id="modalScreen" class="screen hidden">
     <div class="modal">
-      <div id="modalEyebrow" class="eyebrow" style="justify-content:center">SIMULATION SUSPENDED</div>
+      <div id="modalEyebrow" class="eyebrow" style="justify-content:center">PAUSED</div>
       <h2 id="modalTitle">PAUSED</h2>
-      <p id="modalText">The combat grid is holding your position.</p>
+      <p id="modalText">Take a breath. Resume when ready.</p>
+      <div id="resultRank"></div>
       <div id="resultGrid" class="result-grid hidden">
         <div><b id="resultScore">0</b><span>SCORE</span></div>
         <div><b id="resultKills">0</b><span>ELIMS</span></div>
         <div><b id="resultAccuracy">0%</b><span>ACCURACY</span></div>
         <div><b id="resultTime">0:00</b><span>TIME</span></div>
         <div><b id="resultGrade">—</b><span>GRADE</span></div>
+        <div style="grid-column:1/-1"><b id="resultMedals" style="font-size:11px;letter-spacing:.12em">NO MEDALS</b><span>MEDALS</span></div>
       </div>
-      <button id="resumeButton" class="primary">Resume operation</button>
-      <button id="quitButton" class="secondary">Return to title</button>
+      <button id="resumeButton" class="primary">Resume</button>
+      <button id="shareScoreButton" class="secondary hidden">Share score</button>
+      <button id="quitButton" class="secondary">Main menu</button>
     </div>
   </section>
+
+  <div id="clickGate" class="hidden" role="dialog" aria-label="Start">
+    <div class="gate-card">
+      <div class="eyebrow" style="justify-content:center;margin-bottom:12px">LUMMY LABS</div>
+      <h2>NEON <em style="color:transparent;-webkit-text-stroke:1px var(--cyan)">BREACH</em></h2>
+      <p>Browser tactical FPS · party ranks · DualSense ready.<br>Click anywhere to unlock audio &amp; enter command.</p>
+      <span class="pulse">CLICK / TAP TO START</span>
+    </div>
+  </div>
+
+  <div id="welcomeGate" class="hidden" role="dialog" aria-modal="true" aria-label="Welcome">
+    <div class="gate-card">
+      <div class="eyebrow" style="justify-content:center;margin-bottom:12px">WELCOME, OPERATIVE</div>
+      <h2>Join the breach</h2>
+      <p>30 seconds and you’re in. Pick a callsign and a comfort level — you can change this later in Settings.</p>
+      <div class="field">
+        <label for="welcomeCallsign">CALLSIGN</label>
+        <input id="welcomeCallsign" type="text" maxlength="16" placeholder="YOUR NAME" autocomplete="nickname" spellcheck="false">
+      </div>
+      <div class="field">
+        <label>COMFORT</label>
+        <div class="chips">
+          <button type="button" id="welcomeFamily" class="secondary on">Family</button>
+          <button type="button" id="welcomeStandard" class="secondary">Standard</button>
+        </div>
+      </div>
+      <button id="welcomeGo" class="primary">Enter command</button>
+      <p style="margin:14px 0 0;font-size:11px;color:var(--muted)">Tip: Host with <code style="color:var(--cyan)">npm run dev</code> and share the Network URL for party ranks.</p>
+    </div>
+  </div>
 
   <section id="webglErrorScreen" class="screen hidden" role="alert" aria-live="assertive">
     <div class="modal">

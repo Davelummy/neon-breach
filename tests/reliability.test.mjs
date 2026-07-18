@@ -8,8 +8,9 @@ test('local API routes return JSON instead of the application shell', async () =
   const source = await readFile('scripts/serve.mjs', 'utf8');
   assert.match(source, /pathname\.startsWith\('\/api\/'\)/);
   assert.match(source, /Content-Type': 'application\/json; charset=utf-8/);
-  assert.match(source, /Campaign storage is unavailable/);
-  assert.match(source, /Leaderboard storage is unavailable/);
+  assert.match(source, /Campaign cloud is optional/);
+  assert.match(source, /handleLeaderboard/);
+  assert.match(source, /leaderboard\.json/);
   assert.match(source, /API route not found/);
 });
 
