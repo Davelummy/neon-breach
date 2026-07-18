@@ -1,7 +1,7 @@
 {
-  "name": "Neon Breach — Web FPS",
+  "name": "NEON BREACH",
   "short_name": "Neon Breach",
-  "description": "A polished true-3D tactical FPS vertical slice: infiltrate, breach a data center, defend an uplink, eliminate Commander Voss, and extract by vehicle with adaptive music and PS5 DualSense controls.",
+  "description": "Free browser tactical FPS. Party leaderboard for family & friends, DualSense support, three operations. No install required.",
   "start_url": "/",
   "scope": "/",
   "display": "fullscreen",

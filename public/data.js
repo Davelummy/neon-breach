@@ -40,19 +40,93 @@ const ENEMY_TYPES = {
 
 // Weapons with an `unlock` field are earned through career stats (summed
 // across all campaign records); the rest are always available.
+// Weapon profiles — cadence, recoil pattern, and falloff drive feel (see shoot() in game.js).
+// recoilClimb: vertical camera kick · recoilYaw: horizontal drift bias · recover: settle speed mult
+// rpm-ish: rifle ~700, pistol ~240 semi, dmr ~140, shotgun pump ~75
 const WEAPONS = [
-  {id:'rifle',name:'VX-9 PULSE RIFLE',short:'VX-9',mode:'AUTO',mag:30,reserve:120,reload:1.45,cooldown:.095,damage:29,pellets:1,spread:.018,recoil:.28,zoom:.57,color:'#31f5db'},
-  {id:'shotgun',name:'SG-12 BREACH SHOTGUN',short:'SG-12',mode:'PUMP',mag:8,reserve:32,reload:1.85,cooldown:.72,damage:15,pellets:7,spread:.105,recoil:.62,zoom:.42,color:'#ffbb55'},
-  {id:'pistol',name:'HMX-4 HEAVY SIDEARM',short:'HMX',mode:'SEMI',mag:12,reserve:60,reload:1.12,cooldown:.22,damage:43,pellets:1,spread:.009,recoil:.34,zoom:.67,color:'#a66cff'},
-  {id:'dmr',name:'NX-7 ARC MARKSMAN',short:'NX-7',mode:'SEMI',mag:10,reserve:50,reload:1.6,cooldown:.4,damage:68,pellets:1,spread:.006,recoil:.5,zoom:.72,color:'#ffd257',unlock:{kills:50,label:'50 CAREER ELIMINATIONS'}}
+  {id:'rifle',name:'VX-9 CARBINE',short:'VX-9',mode:'AUTO',mag:30,reserve:120,reload:1.48,cooldown:.086,damage:27,pellets:1,spread:.014,recoil:.24,recoilClimb:.019,recoilYaw:.009,recover:1.15,zoom:.56,color:'#31f5db'},
+  {id:'shotgun',name:'SG-12 COMBAT',short:'SG-12',mode:'PUMP',mag:8,reserve:32,reload:1.9,cooldown:.74,damage:13,pellets:8,spread:.1,recoil:.72,recoilClimb:.048,recoilYaw:.02,recover:.72,zoom:.38,color:'#ffbb55'},
+  {id:'pistol',name:'HMX-4 SIDEARM',short:'HMX',mode:'SEMI',mag:12,reserve:60,reload:1.1,cooldown:.2,damage:42,pellets:1,spread:.007,recoil:.32,recoilClimb:.028,recoilYaw:.014,recover:1.35,zoom:.66,color:'#a66cff'},
+  {id:'dmr',name:'NX-7 MARKSMAN',short:'NX-7',mode:'SEMI',mag:10,reserve:50,reload:1.65,cooldown:.38,damage:70,pellets:1,spread:.004,recoil:.48,recoilClimb:.042,recoilYaw:.008,recover:.65,zoom:.76,color:'#ffd257',unlock:{kills:50,label:'50 CAREER ELIMINATIONS'}}
 ];
 
 // Passive perks earned through career milestones and applied on deploy.
+// Prefer playstyle tradeoffs (heal/recharge/vehicle) over pure stat bloat.
 const PERKS = [
   {id:'plating',name:'REINFORCED PLATING',desc:'+20 MAX ARMOR',unlock:{victories:1,label:'WIN ANY OPERATION'},apply:{maxArmor:120}},
   {id:'aegis',name:'AEGIS CAPACITOR',desc:'+15 MAX SHIELD',unlock:{takedowns:8,label:'8 CAREER FINISHERS'},apply:{maxShield:65}},
-  {id:'mags',name:'EXTENDED MAGAZINES',desc:'+35% RESERVE AMMO',unlock:{kills:120,label:'120 CAREER ELIMINATIONS'},apply:{reserveMult:1.35}}
+  {id:'mags',name:'EXTENDED MAGAZINES',desc:'+35% RESERVE AMMO',unlock:{kills:120,label:'120 CAREER ELIMINATIONS'},apply:{reserveMult:1.35}},
+  {id:'jets',name:'AFTERBURNER CELL',desc:'+40% JET RECHARGE',unlock:{kills:80,label:'80 CAREER ELIMINATIONS'},apply:{jetRecharge:1.4}},
+  {id:'vampire',name:'FINISHER PROTOCOL',desc:'FINISHERS RESTORE 12 HP',unlock:{takedowns:15,label:'15 CAREER FINISHERS'},apply:{takedownHeal:12}},
+  {id:'hull',name:'INTERCEPTOR PLATING',desc:'VEHICLES +40 HULL',unlock:{roadkills:5,label:'5 CAREER ROADKILLS'},apply:{vehicleHp:140}}
 ];
+
+// Stage types the mission engine understands. Keep tests in sync.
+//   reach | defend | hvt | extract | destroy
+const STAGE_TYPES = ['reach','defend','hvt','extract','destroy'];
+
+// Boss phase ability verbs (fired once when HP crosses phase.at).
+// shockwave — knockback + damage near commander
+// cloak     — temporary evasion / reduced hit acceptance
+// slam      — ground slam damage in a radius
+const BOSS_ABILITIES = new Set(['shockwave','cloak','slam']);
+
+// Per-operation mechanical identity (engine reads these at deploy / AI tick).
+// layoutPatches open/wall cells on the shared map after a base restore.
+// forceTime: lock day/night for the op · vehicleStage: auto-stage car near player
+// sight*: AI sight range · noiseMult: gunfire alert · pistolNightBonus: damage mult
+const OP_RULES = {
+  'first-strike': {
+    forceTime: null, sightDay: 13.2, sightNight: 9.1, noiseMult: 1, stealth: false,
+    pistolNightBonus: 1, vehicleStage: -1, nightVision: false,
+    layoutPatches: { open: [[9,5],[14,5],[9,18],[14,18]], wall: [] }
+  },
+  'night-raptor': {
+    forceTime: 'night', sightDay: 10.5, sightNight: 6.1, noiseMult: 1.4, stealth: true,
+    pistolNightBonus: 1.28, vehicleStage: -1, nightVision: true,
+    layoutPatches: { open: [[11,8],[12,8],[11,15],[12,15]], wall: [[6,12,1],[17,12,1]] }
+  },
+  'iron-harvest': {
+    forceTime: null, sightDay: 12, sightNight: 8, noiseMult: 1.1, stealth: false,
+    pistolNightBonus: 1, vehicleStage: 1, nightVision: false,
+    layoutPatches: { open: [[11,5],[12,5],[11,7],[12,7],[10,4],[13,4]], wall: [[8,10,3],[15,10,3]] }
+  }
+};
+
+// End-of-run medals (pure evaluation — no DOM).
+const MEDAL_DEFS = [
+  { id: 'iron-will', name: 'IRON WILL', desc: 'Win with ≥70% vitals', check: s => s.victory && s.healthPct >= .7 },
+  { id: 'deadeye', name: 'DEADEYE', desc: '≥55% accuracy', check: s => s.victory && s.accuracy >= .55 },
+  { id: 'chain-lord', name: 'CHAIN LORD', desc: 'Reach x6 chain', check: s => s.comboPeak >= 6 },
+  { id: 'road-warrior', name: 'ROAD WARRIOR', desc: '3+ vehicle kills', check: s => s.roadkills >= 3 },
+  { id: 'ghost', name: 'GHOST PROTOCOL', desc: 'Win under 8 minutes', check: s => s.victory && s.totalTime < 480 },
+  { id: 'finisher', name: 'CLOSE QUARTERS', desc: '4+ finishers', check: s => s.takedowns >= 4 },
+  { id: 'untouchable', name: 'UNTOUCHABLE', desc: 'Win without taking HP damage', check: s => s.victory && s.damageTaken <= 0 }
+];
+
+// Daily challenge modifiers (selected by UTC date seed).
+const DAILY_MODIFIERS = [
+  { id: 'no-jet', label: 'DEAD THRUSTERS', desc: 'Jet assist disabled', rules: { noJet: true } },
+  { id: 'shotgun-only', label: 'BREACH ONLY', desc: 'Shotgun locked as primary', rules: { weaponLock: 1 } },
+  { id: 'double-stalkers', label: 'HUNTER NIGHT', desc: 'Stalker packs + night forced', rules: { forceNight: true, stalkerBoost: true } },
+  { id: 'glass-cannon', label: 'GLASS CANNON', desc: 'You deal +25%, take +35%', rules: { playerDamage: 1.25, enemyDamage: 1.35 } },
+  { id: 'speed-run', label: 'HARD CLOCK', desc: 'Score bonus for fast clears', rules: { speedBonus: true } }
+];
+
+function dailySeed(date = new Date()) {
+  return date.getUTCFullYear() * 10000 + (date.getUTCMonth() + 1) * 100 + date.getUTCDate();
+}
+
+function dailyModifier(date = new Date()) {
+  const seed = dailySeed(date);
+  return { seed, ...DAILY_MODIFIERS[seed % DAILY_MODIFIERS.length] };
+}
+
+function evaluateMedals(stats) {
+  return MEDAL_DEFS.filter(medal => {
+    try { return medal.check(stats); } catch { return false; }
+  }).map(medal => ({ id: medal.id, name: medal.name, desc: medal.desc }));
+}
 
 const CAR_SPAWNS = [
   {x:4.5,y:12.2,dir:0,color:'#31f5db'},
@@ -110,8 +184,8 @@ const OPERATIONS = [
        confirmComms:'Voss is down. Leave the command building and secure an interceptor immediately.',
        squad:[['titan',16.65,18.05,{elite:true,commander:true}],['specter',16.5,16.5],['specter',17.55,16.45],['wraith',21.15,17.2]],
        boss:{phases:[
-         {at:.66,announce:'VOSS // PHASE II',sub:'ASSAULT PLATING ENGAGED',comms:'Voss is escalating—his guard detail is falling back to him. Keep the pressure on.',speedMult:1.22,summon:[['specter',16.5,16.5],['wraith',21.15,17.2]]},
-         {at:.33,announce:'VOSS // OVERDRIVE',sub:'SERVOS BURNING OUT',comms:'His armor is failing and he knows it. Survive the overdrive and finish this.',speedMult:1.5,fireMult:1.45,summon:[['stalker',18.5,11.5],['wraith',16.5,16.5]]}
+         {at:.66,announce:'VOSS // PHASE II',sub:'ASSAULT PLATING ENGAGED',ability:'shockwave',comms:'Voss is escalating—shockwave plating online. Keep pressure and watch for knockback.',speedMult:1.22,summon:[['specter',16.5,16.5],['wraith',21.15,17.2]]},
+         {at:.33,announce:'VOSS // OVERDRIVE',sub:'SERVOS BURNING OUT',ability:'shockwave',comms:'His armor is failing and he knows it. Survive the overdrive and finish this.',speedMult:1.5,fireMult:1.45,summon:[['stalker',18.5,11.5],['wraith',16.5,16.5]]}
        ]}},
       {code:'EXTRACT',type:'extract',title:'BURN OUT',objective:'TAKE AN INTERCEPTOR AND REACH EXTRACTION',target:[19.4,12.1],beacon:[11.5,2.5],
        armObjective:'DRIVE TO THE NORTH EXTRACTION BEACON',armAnnounce:'DRIVE NORTH // BOOST AUTHORIZED',
@@ -145,8 +219,8 @@ const OPERATIONS = [
        confirmComms:'Raptor Actual is silent. Get to an interceptor and run the southern corridor before dawn.',
        squad:[['specter',5.35,4.45,{elite:true,commander:true}],['raven',7.15,7.15],['stalker',7.05,5.45],['stalker',2.6,7.4]],
        boss:{phases:[
-         {at:.66,announce:'RAPTOR // PHASE II',sub:'GHOST PROTOCOL ACTIVE',comms:'Raptor went evasive and called in close-quarters cover. Watch your blind side.',speedMult:1.35,summon:[['stalker',7.05,5.45],['stalker',2.6,7.4]]},
-         {at:.33,announce:'RAPTOR // LAST LIGHT',sub:'SIGNAL FLARE // ALL UNITS',comms:'That flare just told every survivor where you are. End this fast.',speedMult:1.55,fireMult:1.5,summon:[['raven',9.2,8.8],['wraith',5.5,9.6]]}
+         {at:.66,announce:'RAPTOR // PHASE II',sub:'GHOST PROTOCOL ACTIVE',ability:'cloak',comms:'Raptor went ghost—cloak active. Watch your blind side and track muzzle flash.',speedMult:1.35,summon:[['stalker',7.05,5.45],['stalker',2.6,7.4]]},
+         {at:.33,announce:'RAPTOR // LAST LIGHT',sub:'SIGNAL FLARE // ALL UNITS',ability:'cloak',comms:'That flare just told every survivor where you are. End this fast.',speedMult:1.55,fireMult:1.5,summon:[['raven',9.2,8.8],['wraith',5.5,9.6]]}
        ]}},
       {code:'EXTRACT',type:'extract',title:'DAWN LINE',objective:'TAKE AN INTERCEPTOR AND REACH EXTRACTION',target:[4.5,12.2],beacon:[11.5,21.5],
        armObjective:'DRIVE TO THE SOUTH EXTRACTION BEACON',armAnnounce:'DRIVE SOUTH // BOOST AUTHORIZED',
@@ -172,16 +246,17 @@ const OPERATIONS = [
          {at:13,squad:[['warden',11.5,2.5],['raven',9.4,4.4]]},
          {at:6,squad:[['titan',15.1,12.1],['warden',11.5,6.6],['stalker',9.2,6.8]]}
        ]},
-      {code:'SWEEP',type:'reach',title:'SOUTH GATE',objective:'REACH THE SOUTHWEST VAULT',target:[2.5,21.5],radius:1.45,range:20,
-       comms:'Core secured. The vault codes are in the southwest quarter—cut diagonally and keep moving.',
+      {code:'SWEEP',type:'destroy',title:'VAULT KEYS',objective:'DESTROY THE THREE VAULT RELAYS',target:[5.5,11.7],radius:12,range:20,
+       comms:'Core secured. Three vault relays still gate the southwest codes—shoot each relay until it fails, then push to Warden-6.',
+       nodes:[{x:5.5,y:11.7,hp:90},{x:2.5,y:11.2,hp:90},{x:8.9,y:9.4,hp:90}],
        squad:[['specter',5.5,11.7],['warden',2.5,11.2],['stalker',8.9,9.4]]},
       {code:'HVT',type:'hvt',title:'WARDEN-6',objective:'DESTROY WARDEN-6',target:[21.15,17.2],
        comms:'Their lead armor unit is hunting you—a command titan they call Warden-6. Kill it before it corners you.',
        confirmComms:'Warden-6 is scrap. Secure an interceptor and burn for the northeast beacon.',
        squad:[['titan',21.15,17.2,{elite:true,commander:true}],['warden',16.5,16.5],['raven',17.55,16.45],['stalker',18.5,11.5]],
        boss:{phases:[
-         {at:.66,announce:'WARDEN-6 // PHASE II',sub:'ESCORT PROTOCOL ENGAGED',comms:'It is deploying barrier escorts. Break the wardens from behind or burn them down with the finisher.',speedMult:1.2,summon:[['warden',18.5,11.5],['stalker',21.2,11.2]]},
-         {at:.33,announce:'WARDEN-6 // MELTDOWN',sub:'REACTOR VENTING // DANGER CLOSE',comms:'Its reactor is venting—it will try to run you down. Do not let it corner you.',speedMult:1.55,fireMult:1.4,summon:[['raven',16.5,16.5],['stalker',17.55,16.45]]}
+         {at:.66,announce:'WARDEN-6 // PHASE II',sub:'ESCORT PROTOCOL ENGAGED',ability:'slam',comms:'It is deploying barrier escorts and ground slams. Break wardens from behind or finish them.',speedMult:1.2,summon:[['warden',18.5,11.5],['stalker',21.2,11.2]]},
+         {at:.33,announce:'WARDEN-6 // MELTDOWN',sub:'REACTOR VENTING // DANGER CLOSE',ability:'slam',comms:'Its reactor is venting—it will try to run you down. Do not let it corner you.',speedMult:1.55,fireMult:1.4,summon:[['raven',16.5,16.5],['stalker',17.55,16.45]]}
        ]}},
       {code:'EXTRACT',type:'extract',title:'SCORCHED RUN',objective:'TAKE AN INTERCEPTOR AND REACH EXTRACTION',target:[12.1,4.5],beacon:[21.5,2.5],
        armObjective:'DRIVE TO THE NORTHEAST EXTRACTION BEACON',armAnnounce:'DRIVE NORTHEAST // BOOST AUTHORIZED',
@@ -210,6 +285,24 @@ wallRect(10,10,4,1,3); wallRect(10,13,4,1,3); wallRect(10,11,1,2,3); wallRect(13
 wallRect(3,9,4,1,1); wallRect(17,9,4,1,1); wallRect(3,14,4,1,1); wallRect(17,14,4,1,1);
 wallRect(8,3,1,4,2); wallRect(15,3,1,4,2); wallRect(8,17,1,4,2); wallRect(15,17,1,4,2);
 map[9][5]=0; map[14][18]=0; map[4][8]=0; map[19][15]=0;
+// Immutable snapshot so per-op layout patches can restore + mutate safely.
+const MAP_BASE = map.map(row => row.slice());
+
+function restoreMapBase() {
+  for (let y = 0; y < MAP_H; y++) for (let x = 0; x < MAP_W; x++) map[y][x] = MAP_BASE[y][x];
+}
+
+function applyOperationLayout(opId) {
+  restoreMapBase();
+  const patches = OP_RULES[opId]?.layoutPatches;
+  if (!patches) return;
+  for (const [x, y] of patches.open || []) {
+    if (y > 0 && y < MAP_H - 1 && x > 0 && x < MAP_W - 1) map[y][x] = 0;
+  }
+  for (const [x, y, type = 1] of patches.wall || []) {
+    if (y > 0 && y < MAP_H - 1 && x > 0 && x < MAP_W - 1) map[y][x] = type;
+  }
+}
 
 // Two traversable buildings: perimeter walls, doors, windows and interior stairs.
 function buildInterior(x,y,w,h,doorX,doorY){
@@ -223,4 +316,8 @@ buildInterior(15,15,6,6,18,15);map[20][18]=4;map[17][15]=4;map[17][20]=4;
 const STAIR_ZONES=[{x1:4,x2:5.9,y1:4,y2:7.6,axis:'y',reverse:true},{x1:18.1,x2:20,y1:16,y2:19.6,axis:'y',reverse:false}];
 
 export { MAP_W, MAP_H, GROUND_HEIGHT, WALL_HEIGHTS, DIFFICULTIES, ENEMY_TYPES, WEAPONS, PERKS,
-  CAR_SPAWNS, WAVE_TABLE, MISSIONS, OPERATIONS, MISSION_CONDITIONS, spawns, map, STAIR_ZONES };
+  STAGE_TYPES, BOSS_ABILITIES, OP_RULES, MEDAL_DEFS, DAILY_MODIFIERS, dailySeed, dailyModifier, evaluateMedals,
+  applyOperationLayout, restoreMapBase, MAP_BASE, CAR_SPAWNS, WAVE_TABLE, MISSIONS, OPERATIONS,
+  MISSION_CONDITIONS, spawns, map, STAIR_ZONES };
+
+// Re-export MEDAL_DEFS id list is available for UI catalog consumers.

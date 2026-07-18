@@ -8,3 +8,4 @@ smoke-gameplay.png
 .env
 .env.*
 !.env.example
+.data

@@ -1,4 +1,4 @@
-const CACHE = 'neon-breach-v44';
+const CACHE = 'neon-breach-v66-netlify-live';
 const CORE = ['/', '/manifest.webmanifest', '/icon.svg', '/game.js', '/data.js', '/audio.js', '/scene3d.js', '/render-utils.js', '/vendor/three.module.min.js', '/vendor/three.core.min.js'];
 
 self.addEventListener('install', event => {

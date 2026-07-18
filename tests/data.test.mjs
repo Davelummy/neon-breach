@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  MAP_W, MAP_H, WALL_HEIGHTS, DIFFICULTIES, ENEMY_TYPES, WEAPONS,
+  MAP_W, MAP_H, WALL_HEIGHTS, DIFFICULTIES, ENEMY_TYPES, WEAPONS, PERKS,
+  STAGE_TYPES, BOSS_ABILITIES, OP_RULES, MEDAL_DEFS, DAILY_MODIFIERS,
+  dailySeed, dailyModifier, evaluateMedals, applyOperationLayout, restoreMapBase, MAP_BASE,
   WAVE_TABLE, OPERATIONS, spawns, map, STAIR_ZONES
 } from '../public/data.js';
 
-const STAGE_TYPES = new Set(['reach', 'defend', 'hvt', 'extract']);
+const STAGE_TYPE_SET = new Set(STAGE_TYPES);
 const openCell = (x, y) => map[Math.floor(y)]?.[Math.floor(x)] === 0;
 
 test('map is a sealed 24x24 grid with solid boundary', () => {
@@ -58,7 +60,7 @@ test('every stage is engine-valid: type, target, squads, and type-specific field
   for (const op of OPERATIONS) {
     for (const stage of op.stages) {
       const label = `${op.id}/${stage.code}`;
-      assert.ok(STAGE_TYPES.has(stage.type), `${label}: unknown stage type "${stage.type}"`);
+      assert.ok(STAGE_TYPE_SET.has(stage.type), `${label}: unknown stage type "${stage.type}"`);
       assert.ok(stage.title && stage.objective && stage.comms, `${label}: missing copy`);
       const [tx, ty] = stage.target;
       assert.ok(tx > 0 && ty > 0 && tx < MAP_W - 1 && ty < MAP_H - 1, `${label}: target out of bounds`);
@@ -69,6 +71,13 @@ test('every stage is engine-valid: type, target, squads, and type-specific field
         for (const wave of stage.reinforcements || []) {
           assert.ok(wave.at >= 0 && wave.at < stage.hold, `${label}: reinforcement mark ${wave.at} outside hold window`);
           checkSquad(op.id, stage.code, wave.squad);
+        }
+      }
+      if (stage.type === 'destroy') {
+        assert.ok(Array.isArray(stage.nodes) && stage.nodes.length >= 2, `${label}: destroy stage needs 2+ relay nodes`);
+        for (const node of stage.nodes) {
+          assert.ok(openCell(node.x, node.y), `${label}: destroy node (${node.x},${node.y}) is walled`);
+          assert.ok(node.hp > 0, `${label}: destroy node needs positive hp`);
         }
       }
       if (stage.type === 'hvt') {
@@ -82,10 +91,13 @@ test('every stage is engine-valid: type, target, squads, and type-specific field
           assert.ok(phase.at < previous, `${label}: phase thresholds must strictly descend`);
           previous = phase.at;
           assert.ok(phase.announce, `${label}: phase missing announce copy`);
+          if (phase.ability) assert.ok(BOSS_ABILITIES.has(phase.ability), `${label}: unknown boss ability "${phase.ability}"`);
           if (phase.speedMult) assert.ok(phase.speedMult > 1 && phase.speedMult < 2.5, `${label}: absurd speedMult`);
           if (phase.fireMult) assert.ok(phase.fireMult > 1 && phase.fireMult < 2.5, `${label}: absurd fireMult`);
           if (phase.summon) checkSquad(op.id, `${stage.code}-phase`, phase.summon);
         }
+        // Every HVT should teach a unique boss verb for identity.
+        assert.ok(phases.every(p => p.ability), `${label}: every boss phase should declare an ability verb`);
       }
       if (stage.type === 'extract') {
         assert.ok(stage.beacon && openCell(stage.beacon[0], stage.beacon[1]), `${label}: extract beacon missing or walled`);
@@ -93,6 +105,63 @@ test('every stage is engine-valid: type, target, squads, and type-specific field
       }
     }
   }
+});
+
+test('career perks are well-formed playstyle unlocks', () => {
+  assert.ok(PERKS.length >= 6, 'expected expanded perk ladder');
+  for (const perk of PERKS) {
+    assert.ok(perk.id && perk.name && perk.desc && perk.unlock && perk.apply, `${perk.id || '?'} incomplete`);
+    assert.ok(perk.unlock.label, `${perk.id} missing unlock label`);
+    assert.ok(Object.keys(perk.apply).length > 0, `${perk.id} empty apply`);
+  }
+});
+
+test('campaign uses all stage types including destroy', () => {
+  const used = new Set(OPERATIONS.flatMap(op => op.stages.map(s => s.type)));
+  for (const type of STAGE_TYPES) assert.ok(used.has(type), `stage type "${type}" never used in campaign`);
+});
+
+test('every operation has mechanical OP_RULES', () => {
+  for (const op of OPERATIONS) {
+    const rules = OP_RULES[op.id];
+    assert.ok(rules, `${op.id} missing OP_RULES`);
+    assert.ok(rules.sightDay > 5 && rules.sightNight > 3, `${op.id} sight ranges invalid`);
+    assert.ok(rules.noiseMult > 0, `${op.id} noiseMult invalid`);
+    if (rules.layoutPatches) {
+      for (const [x, y] of rules.layoutPatches.open || []) {
+        assert.ok(x > 0 && y > 0 && x < MAP_W - 1 && y < MAP_H - 1, `${op.id} open patch OOB`);
+      }
+    }
+  }
+});
+
+test('layout patches restore base map and apply safely', () => {
+  restoreMapBase();
+  const sample = MAP_BASE[5][5];
+  applyOperationLayout('iron-harvest');
+  assert.equal(map[11][11], 0, 'iron harvest should open industrial lane');
+  restoreMapBase();
+  assert.equal(map[5][5], sample, 'restoreMapBase returns to snapshot');
+});
+
+test('medals evaluate pure stats correctly', () => {
+  assert.ok(MEDAL_DEFS.length >= 5);
+  const none = evaluateMedals({ victory: false, healthPct: 1, accuracy: 1, comboPeak: 1, roadkills: 0, totalTime: 9999, takedowns: 0, damageTaken: 50 });
+  assert.equal(none.length, 0);
+  const many = evaluateMedals({ victory: true, healthPct: .9, accuracy: .7, comboPeak: 7, roadkills: 4, totalTime: 300, takedowns: 5, damageTaken: 0 });
+  assert.ok(many.some(m => m.id === 'iron-will'));
+  assert.ok(many.some(m => m.id === 'deadeye'));
+  assert.ok(many.some(m => m.id === 'chain-lord'));
+  assert.ok(many.some(m => m.id === 'untouchable'));
+});
+
+test('daily modifier is stable for a UTC date', () => {
+  assert.ok(DAILY_MODIFIERS.length >= 3);
+  const a = dailyModifier(new Date(Date.UTC(2026, 6, 17)));
+  const b = dailyModifier(new Date(Date.UTC(2026, 6, 17)));
+  assert.equal(a.id, b.id);
+  assert.equal(a.seed, dailySeed(new Date(Date.UTC(2026, 6, 17))));
+  assert.ok(a.label && a.rules);
 });
 
 test('weapons are well-formed', () => {

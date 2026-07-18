@@ -1,0 +1,5 @@
+# Fallback if netlify.toml redirects are not applied (publish root)
+/api/leaderboard  /.netlify/functions/leaderboard  200
+/api/campaigns    /.netlify/functions/campaigns    200
+/health           /.netlify/functions/health       200
+/*                /index.html                      200
