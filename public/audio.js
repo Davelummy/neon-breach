@@ -136,6 +136,46 @@ export class AudioSystem {
   empty() { this.tone(170,.035,'square',.08,130); this.burst(.04,.04,800,200); }
   pickup() { this.tone(440,.09,'sine',.1,760); this.tone(760,.12,'sine',.08,1100,.06); }
 
+  // ARES COMMAND voice lines (ElevenLabs mp3s in assets/voice/). Routed through
+  // the master gain so mute and the volume slider apply. One line at a time —
+  // a new request while a line plays is dropped unless it interrupts.
+  _voiceBuffer(name) {
+    this._voiceBuf ??= {};
+    return this._voiceBuf[name] ??= (async () => {
+      const res = await fetch(`assets/voice/${name}.mp3`);
+      if (!res.ok) throw new Error(res.status);
+      return this.ctx.decodeAudioData(await res.arrayBuffer());
+    })().catch(err => { delete this._voiceBuf[name]; throw err; });
+  }
+  preloadVoices(names) {
+    if (!this.ctx) return;
+    for (const name of names) this._voiceBuffer(name).catch(() => {});
+  }
+  async say(name, interrupt = false) {
+    if (!this.ctx || this.muted()) return;
+    this.resume();
+    if (!interrupt && this.ctx.currentTime < (this._voiceBusyUntil || 0)) return;
+    this._voiceBusyUntil = this.ctx.currentTime + .8; // hold the channel while the fetch/decode runs
+    try {
+      const buf = await this._voiceBuffer(name);
+      if (this.muted()) return;
+      if (interrupt) { try { this._voiceSrc?.stop(); } catch {} }
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      const g = this.ctx.createGain();
+      g.gain.value = .9;
+      src.connect(g); g.connect(this.master);
+      const send = this.ctx.createGain();
+      send.gain.value = .12; // touch of the shared reverb = radio room tone
+      g.connect(send); send.connect(this.reverb);
+      src.start();
+      this._voiceSrc = src;
+      this._voiceBusyUntil = this.ctx.currentTime + buf.duration + .3;
+    } catch {
+      this._voiceBusyUntil = 0; // missing/undecodable file: free the channel
+    }
+  }
+
   // Menu / HUD button SFX — short tactile blips (no asset files).
   uiClick(kind='default') {
     this.resume?.();
@@ -241,20 +281,66 @@ export class AudioSystem {
   elite() { this.tone(110,.46,'sawtooth',.12,55);this.tone(220,.32,'square',.045,330,.12);this.burst(.2,.07,900,40,.05,.7); }
   roadkill() { this.burst(.12,.2,380,25);this.tone(62,.18,'sawtooth',.16,31);this.tone(520,.08,'square',.06,790,.08); }
   engine(speed=0,boost=false) { const pitch=70+Math.abs(speed)*13+(boost?48:0);this.tone(pitch,.12,'sawtooth',boost?.055:.028,pitch*.82);if(boost)this.burst(.08,.035,1250,80); }
+  // In-mission combat score: dark cyber pad + restrained pulse (not noisy drums).
+  // ~96 BPM feel on a 16th grid — atmospheric, builds with intensity.
   musicBeat(step,intensity=0,wave=1) {
-    const s=step%16,tension=Math.min(1,intensity+wave*.055),roots=[55,55,65.41,55,73.42,65.41,49,49],root=roots[(step>>1)%roots.length];
-    // Cinematic kick, field snare and metallic hats at roughly 125 BPM.
-    if(s===0||s===6||s===8||s===11){this.tone(62,.14,'sine',.09+tension*.035,31);this.burst(.055,.045+tension*.018,260,24,0,.2);}
-    if(s===4||s===12){this.burst(.13,.055+tension*.025,3800,260,0,.55);this.tone(176,.065,'triangle',.028,108);}
-    if(s%2===1)this.burst(.025,.012+tension*.009,9800,4200,0,.28);
-    if(tension>.55&&s%4===2)this.burst(.04,.014,12800,6900,0,.16);
-    // Dark bass ostinato and pulsing low strings.
-    if(s%2===0){this.tone(root,.34,'triangle',.032+tension*.015,root*.78);this.tone(root*2,.18,'sine',.012+tension*.008,root*1.5,.025);}
-    if(s===0||s===8){this.tone(root/2,1.65,'sine',.021+tension*.01,root/2*.94);this.tone(root*1.5,1.35,'triangle',.008+tension*.006,root*1.35,.06);}
-    // Original tactical motif grows as the battle becomes more dangerous.
-    if(tension>.3&&[3,7,10,14].includes(s)){const motif=[329.63,392,440,293.66,369.99,440,493.88,392][(step+wave)%8];this.tone(motif,.19,'triangle',.012+tension*.012,motif*.91,.025);}
-    if(tension>.68&&(s===0||s===8)){for(const ratio of [1,1.2,1.5])this.tone(root*ratio*2,.42,'sawtooth',.006+tension*.004,root*ratio*1.65,.04);}
-    if(tension>.82&&s===15){this.burst(.32,.045,2100,90,0,.82);this.tone(110,.5,'sawtooth',.038,55);}
+    if(!this.ctx||this.muted())return;
+    const s=step%16;
+    const bar=Math.floor(step/16)%4;
+    const tension=Math.min(1,.25+intensity*.65+wave*.04);
+    // Am → F → Dm → Em (same dark neon family as the menu theme)
+    const roots=[55,43.65,36.71,41.2];
+    const root=roots[bar];
+    const fifth=root*1.5;
+    const vol=0.55+tension*.45; // overall bed level (kept soft under gunfire)
+
+    // Soft sub pulse on 1 & 9 — deep, not a club kick.
+    if(s===0||s===8){
+      this.tone(root,.42,'sine',.055*vol,root*.92);
+      this.tone(root*2,.28,'triangle',.018*vol,root*1.85,.02);
+      this.burst(.08,.018*vol,180,12,0,.25);
+    }
+    // Light mid pulse every half-bar (supports motion without harsh snare).
+    if(s===4||s===12){
+      this.tone(root*3,.12,'sine',.012*vol,root*2.4);
+      this.burst(.05,.014*vol,900,80,0,.2);
+    }
+    // Sparse soft hats only when combat is hot (never metallic spray).
+    if(tension>.55&&s%4===2){
+      this.burst(.02,.008*vol,6500,2800,0,.12);
+    }
+
+    // Warm pad stabs — the real “music” layer.
+    if(s===0){
+      this.tone(root,.9,'triangle',.028*vol,root*.97);
+      this.tone(fifth,.85,'sine',.016*vol,fifth*.96,.03);
+      this.tone(root*2.5,.7,'triangle',.01*vol,root*2.35,.05);
+    }
+    if(s===8){
+      this.tone(root*1.5,.55,'sine',.014*vol,root*1.4);
+      this.tone(fifth*1.5,.5,'triangle',.009*vol,fifth*1.35,.02);
+    }
+    // Gentle bass walk on even 8ths.
+    if(s%2===0&&s!==0&&s!==8){
+      const walk=s===2||s===10?root*1.125:s===6||s===14?root*.75:root;
+      this.tone(walk,.2,'sine',.02*vol,walk*.9);
+    }
+
+    // Sparse neon motif when under fire — soft triangle, never sawtooth screech.
+    if(tension>.4&&[3,7,11,15].includes(s)){
+      const motif=[220,261.63,293.66,246.94,329.63,293.66,261.63,196][(step+wave)%8];
+      this.tone(motif,.22,'triangle',.01+tension*.012,motif*.94,.01);
+    }
+    // High intensity: airy fifths, still restrained.
+    if(tension>.7&&(s===0||s===8)){
+      this.tone(root*4,.35,'sine',.006+tension*.005,root*3.6,.04);
+      this.tone(fifth*2,.3,'triangle',.005+tension*.004,fifth*1.85,.05);
+    }
+    // Peak moment — one soft impact, not a metal crash.
+    if(tension>.85&&s===15){
+      this.tone(root*1.5,.4,'sine',.022,root);
+      this.burst(.12,.02,600,40,0,.35);
+    }
   }
   startHum() {
     if(!this.ctx || this.hum) return;

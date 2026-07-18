@@ -333,13 +333,27 @@ function createHuman(type = 'specter', variant = 0, elite = false, commander = f
   rightLeg.add(rightThigh, rightKnee);
   body.add(leftLeg, rightLeg);
 
-  // Role-accurate carried weapon (not a generic brick).
+  // Role-accurate weapon held in the right hand (readable silhouette at distance).
   const weaponId = type === 'raven' ? 'dmr' : type === 'titan' || type === 'warden' ? 'rifle' : type === 'stalker' ? 'pistol' : type === 'wraith' ? 'pistol' : 'rifle';
   const weapon = createWeaponModel(weaponId, accentColor);
-  weapon.scale.setScalar(.55);
-  weapon.position.set(.12, 1.12, -.28);
-  weapon.rotation.set(-.12, Math.PI, .08);
-  body.add(weapon);
+  const isSidearm = weaponId === 'pistol';
+  // Grip sits in the glove; barrel points along arm-forward (-Z after arm raise).
+  weapon.scale.setScalar(isSidearm ? .72 : .85);
+  weapon.position.set(0.02, -.52, -.08);
+  weapon.rotation.set(-1.42, 0, .06);
+  rightArm.add(weapon);
+  // Per-enemy muzzle flash at the barrel tip (world-readable return fire).
+  const enemyMuzzle = mesh(new THREE.OctahedronGeometry(.07, 0), new THREE.MeshBasicMaterial({ color: 0xffe0a0, transparent: true, opacity: 1 }), false, false);
+  const enemyMuzzleBloom = mesh(new THREE.PlaneGeometry(.18, .18), new THREE.MeshBasicMaterial({ color: 0xff9a40, transparent: true, opacity: .7, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }), false, false);
+  enemyMuzzleBloom.rotation.y = Math.PI / 2;
+  const muzzleLocalZ = (weapon.userData.muzzleZ || -.55) * weapon.scale.x;
+  enemyMuzzle.position.set(0, .02, muzzleLocalZ);
+  enemyMuzzleBloom.position.set(0, .02, muzzleLocalZ - .02);
+  enemyMuzzle.visible = false;
+  enemyMuzzleBloom.visible = false;
+  weapon.add(enemyMuzzle, enemyMuzzleBloom);
+  root.userData.enemyMuzzle = enemyMuzzle;
+  root.userData.enemyMuzzleBloom = enemyMuzzleBloom;
 
   const roleFx = new THREE.Group();
   body.add(roleFx);
@@ -393,19 +407,57 @@ function animateHuman(group, enemy, time) {
   // Weightier walk: longer stride, opposite arm swing, hip counter-rotate.
   const stride = Math.sin(phase) * 1.05 * run;
   const grounded = enemy.grounded !== false;
+  const aiming = !!(enemy.combatState === 'engage' || enemy.combatState === 'hold' || (enemy.muzzleFlash || 0) > 0 || (enemy.fireCooldown || 0) > 0 && (enemy.awareness || 0) > .4);
+  const shooting = (enemy.muzzleFlash || 0) > 0;
   rig.body.rotation.set(0, Math.sin(phase) * .06 * run, Math.sin(phase) * .04 * run);
   rig.body.position.y = grounded ? Math.abs(Math.sin(phase * 2)) * .04 * run : .02;
   rig.leftLeg.rotation.x = grounded ? stride : -.48;
   rig.rightLeg.rotation.x = grounded ? -stride : -.48;
   rig.leftKnee.rotation.x = grounded ? Math.max(0, -stride) * .65 : .95;
   rig.rightKnee.rotation.x = grounded ? Math.max(0, stride) * .65 : .95;
-  rig.leftArm.rotation.x = grounded ? -stride * .72 - .28 : -.7;
-  rig.rightArm.rotation.x = grounded ? stride * .72 - .28 : -.7;
-  rig.leftArm.rotation.z = -.14 - run * .05;
-  rig.rightArm.rotation.z = .14 + run * .05;
-  if(enemy.reloadTimer>0){const reloadWave=Math.sin(Math.min(1,enemy.reloadTimer/1.5)*Math.PI);rig.leftArm.rotation.x=-1.08;rig.rightArm.rotation.x=-.92;rig.leftArm.rotation.z=-.35;rig.weapon.rotation.z=-.28*reloadWave;}
+  if (aiming) {
+    // Both arms raise into a two-handed rifle / pistol hold, barrel toward target.
+    const kick = shooting ? -.18 : 0;
+    rig.rightArm.rotation.x = -1.55 + kick;
+    rig.rightArm.rotation.z = .08;
+    rig.rightArm.rotation.y = -.12;
+    rig.leftArm.rotation.x = -1.35;
+    rig.leftArm.rotation.z = -.42;
+    rig.leftArm.rotation.y = .28;
+    if (rig.weapon) {
+      rig.weapon.rotation.x = -1.42 + kick * .5;
+      rig.weapon.rotation.z = shooting ? .06 : 0;
+    }
+  } else {
+    rig.leftArm.rotation.x = grounded ? -stride * .72 - .28 : -.7;
+    rig.rightArm.rotation.x = grounded ? stride * .72 - .28 : -.7;
+    rig.leftArm.rotation.z = -.14 - run * .05;
+    rig.rightArm.rotation.z = .14 + run * .05;
+    rig.leftArm.rotation.y = 0;
+    rig.rightArm.rotation.y = 0;
+    if (rig.weapon) {
+      rig.weapon.rotation.x = -1.42;
+      rig.weapon.rotation.z = 0;
+    }
+  }
+  if(enemy.reloadTimer>0){const reloadWave=Math.sin(Math.min(1,enemy.reloadTimer/1.5)*Math.PI);rig.leftArm.rotation.x=-1.08;rig.rightArm.rotation.x=-.92;rig.leftArm.rotation.z=-.35;rig.leftArm.rotation.y=0;rig.rightArm.rotation.y=0;if(rig.weapon)rig.weapon.rotation.z=-.28*reloadWave;}
+  // Enemy muzzle flash at barrel — bright and short so return fire is obvious.
+  const flash = Math.max(0, enemy.muzzleFlash || 0);
+  const em = group.userData.enemyMuzzle;
+  const emb = group.userData.enemyMuzzleBloom;
+  if (em && emb) {
+    const on = flash > .05;
+    em.visible = on;
+    emb.visible = on;
+    if (on) {
+      em.scale.setScalar(.7 + flash * 2.4);
+      emb.scale.setScalar(1 + flash * 2.8);
+      emb.material.opacity = Math.min(1, flash * 1.1);
+      em.rotation.z = time * 18 + flash * 4;
+    }
+  }
   rig.torso.rotation.z = Math.sin(phase) * .035 * run;
-  rig.torso.rotation.x = run * .075+(enemy.hitFlash>0?(Math.random()-.5)*.16:0);
+  rig.torso.rotation.x = run * .075+(enemy.hitFlash>0?(Math.random()-.5)*.16:0)+(shooting?-.08:0);
   rig.headPivot.rotation.y = Math.sin(time * .7 + enemy.x) * .045;
   const squash = Math.max(0, enemy.landingSquash || 0);
   group.scale.set(1 + squash * .09, 1 - squash * .12, 1 + squash * .09);
@@ -739,20 +791,27 @@ function syncProjectiles(frame) {
     let object = projectileMeshes.get(projectile);
     if (!object) {
       const color = { titan: 0xffbb55, warden: 0x74c2ff, raven: 0xffd257 }[projectile.type] ?? 0xff294d;
-      // Streak tracer instead of a bare sphere — reads as a real round in flight.
+      // Bright, long tracer — enemy return fire must read at combat range.
       object = new THREE.Group();
-      const core = mesh(new THREE.SphereGeometry(.04, 6, 4), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 8 }), false, false);
-      const trail = mesh(new THREE.CylinderGeometry(.012, .028, .42, 5), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 4, transparent: true, opacity: .75 }), false, false);
+      const core = mesh(new THREE.SphereGeometry(.09, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }), false, false);
+      const glow = mesh(new THREE.SphereGeometry(.16, 8, 6), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .85, depthWrite: false, blending: THREE.AdditiveBlending }), false, false);
+      const trail = mesh(new THREE.CylinderGeometry(.035, .09, 1.15, 6), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .9, depthWrite: false, blending: THREE.AdditiveBlending }), false, false);
+      const trailSoft = mesh(new THREE.CylinderGeometry(.06, .14, 1.6, 6), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .35, depthWrite: false, blending: THREE.AdditiveBlending }), false, false);
       trail.rotation.x = Math.PI / 2;
-      trail.position.z = .18;
-      object.add(core, trail);
+      trail.position.z = .5;
+      trailSoft.rotation.x = Math.PI / 2;
+      trailSoft.position.z = .7;
+      object.add(trailSoft, trail, glow, core);
       object.userData.trail = trail;
       projectileMeshes.set(projectile, object); effectsRoot.add(object); rendered.projectiles.add(object);
     }
     current.add(object);
-    object.position.set(projectile.x, projectile.z || .55, projectile.y);
+    // Chest/gun height fallback if z missing (never spawn at ankle height).
+    object.position.set(projectile.x, projectile.z ?? 1.35, projectile.y);
     if (projectile.dx != null || projectile.dy != null) {
       object.rotation.y = -Math.atan2(projectile.dy || 0, projectile.dx || 1) - Math.PI / 2;
+      const pitch = Math.atan2(projectile.dz || 0, Math.hypot(projectile.dx || 0, projectile.dy || 0) || 1);
+      object.rotation.x = pitch;
     }
   }
   prune(rendered.projectiles, current);
