@@ -567,6 +567,59 @@ import { AudioSystem } from '/audio.js';
         callsign.addEventListener('change',()=>{setCallsign(callsign.value);playUiClick('toggle');showMessage(`Callsign // ${getCallsign()}`);});
         callsign.addEventListener('blur',()=>setCallsign(callsign.value));
       }
+      const syncInput=$('settingSyncCode');
+      if(syncInput){
+        syncInput.value=getSyncCode();
+        $('copySyncCode')?.addEventListener('click',async()=>{
+          try{await navigator.clipboard.writeText(getSyncCode());showMessage('Transfer code copied');playUiClick('confirm');}
+          catch{showMessage(getSyncCode());}
+        });
+        $('applySyncCode')?.addEventListener('click',()=>{
+          const code=setSyncCode(syncInput.value);
+          campaignCloud.offline=false;
+          playUiClick('confirm');
+          showMessage(`Sync code // ${code}`);
+          loadCampaignRecords();
+        });
+      }
+      const partyInput=$('settingPartyCode');
+      if(partyInput){
+        partyInput.value=getPartyCode();
+        partyInput.addEventListener('change',()=>{setPartyCode(partyInput.value);loadLeaderboard();playUiClick('toggle');});
+        $('createPartyCode')?.addEventListener('click',()=>{
+          const code=createPartyCode();
+          if(partyInput)partyInput.value=code;
+          playUiClick('confirm');
+          showMessage(`Party ${code} — share invite link`);
+          loadLeaderboard();
+        });
+        $('leavePartyCode')?.addEventListener('click',()=>{
+          setPartyCode('');
+          if(partyInput)partyInput.value='';
+          playUiClick('back');
+          showMessage('Back on world board');
+          loadLeaderboard();
+        });
+      }
+      // Operation filter chips on ranks screen
+      const filterHost=$('rankOpFilter');
+      if(filterHost&&!filterHost.dataset.ready){
+        filterHost.dataset.ready='1';
+        const makeChip=(label,op)=>{
+          const btn=document.createElement('button');
+          btn.type='button';btn.textContent=label;btn.dataset.op=op===null?'all':String(op);
+          if(op===null)btn.classList.add('active');
+          btn.addEventListener('click',()=>{
+            leaderboardOpFilter=op;
+            filterHost.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b===btn));
+            playUiClick('toggle');
+            loadLeaderboard();
+          });
+          filterHost.append(btn);
+        };
+        makeChip('ALL',null);
+        OPERATIONS.forEach((op,i)=>makeChip(op.short||`OP${i+1}`,i));
+      }
       const sens=$('settingSens');
       if(sens){
         sens.value=String(Math.round(prefs.lookSens*100));
@@ -831,6 +884,7 @@ import { AudioSystem } from '/audio.js';
       $('menuRoot')?.classList.add('hidden'); $('modalScreen').classList.add('hidden'); $('hud').classList.remove('hidden');
       if(coarsePointer)$('touchControls').classList.remove('hidden'); else{pointerWanted=true;requestLock();showMessage('WASD move · click to look');}
       beginOperation(resumeStage,!!saved);maybeStageVehicle(resumeStage);updateHUD();campaignCloud.saveTimer=12;saveCampaign('active',true);
+      if(!saved)sendTelemetry('op_start',{operation:state.operation});
     }
 
     function maybeStageVehicle(stage){
@@ -897,9 +951,11 @@ import { AudioSystem } from '/audio.js';
       $('modalScreen').classList.remove('hidden');saveCampaign(victory?'victory':'failed',true);
       renderMedalCollection();
       // Party board — local + LAN host, no login required. Then celebrate rank.
+      sendTelemetry(victory?'op_victory':'op_failed',{operation:state.operation});
       submitPartyScore({
         score:finalScore,kills:player.kills,grade,victory,
-        operation:state.operation,difficulty:state.difficulty,time_of_day:state.timeOfDay
+        operation:state.operation,difficulty:state.difficulty,time_of_day:state.timeOfDay,
+        elapsed_seconds:Math.floor(state.totalTime)
       }).then(rank=>{
         if(!rank||!rankEl)return;
         state.lastPartyRank=rank;
@@ -1756,13 +1812,39 @@ import { AudioSystem } from '/audio.js';
       return {id:campaignCloud.id,status,operation:state.operation,difficulty:state.difficulty,time_of_day:state.timeOfDay,wave:Math.max(1,state.wave),score:player.score,kills:player.kills,shots:player.shots,hits:player.hits,takedowns:state.takedowns,roadkills:state.roadkills,health:Math.ceil(player.health),shield:Math.ceil(player.shield),armor:Math.ceil(player.armor),weapon_index:player.weaponIndex,elapsed_seconds:Math.floor(state.totalTime)};
     }
 
+    const SYNC_KEY='neon-breach-sync';
+    function getSyncCode(){
+      try{
+        const saved=localStorage.getItem(SYNC_KEY);
+        if(saved&&/^[A-Z0-9]{6,24}$/.test(saved))return saved;
+      }catch{}
+      const bytes=new Uint8Array(10);
+      (crypto.getRandomValues?crypto.getRandomValues(bytes):bytes.fill(7));
+      const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let code='';
+      for(let i=0;i<10;i++)code+=alphabet[bytes[i]%alphabet.length];
+      try{localStorage.setItem(SYNC_KEY,code);}catch{}
+      return code;
+    }
+    function setSyncCode(value){
+      const clean=String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,24);
+      if(!/^[A-Z0-9]{6,24}$/.test(clean))return getSyncCode();
+      try{localStorage.setItem(SYNC_KEY,clean);}catch{}
+      const input=$('settingSyncCode');if(input)input.value=clean;
+      const label=$('syncCodeDisplay');if(label)label.textContent=clean;
+      return clean;
+    }
+    function campaignHeaders(extra={}){
+      return {'accept':'application/json','x-neon-profile':getSyncCode(),...extra};
+    }
+
     async function saveCampaign(status='active',force=false){
       if(campaignCloud.syncing){if(force||status!=='active')campaignCloud.pendingStatus=status;return;}
       if(!force&&state.mode!=='playing')return;campaignCloud.syncing=true;if($('syncStatus'))$('syncStatus').textContent='SAVING';
       const payload=campaignPayload(status);
       if(campaignCloud.offline){writeLocalCampaign(status,payload);if(status==='active')campaignCloud.active={...payload};else{campaignCloud.records=[{...payload},...campaignCloud.records].slice(0,8);campaignCloud.active=null;}renderCampaignRecords();if($('syncStatus'))$('syncStatus').textContent='LOCAL SAVE';campaignCloud.syncing=false;return;}
       try{
-        const response=await fetch('/api/campaigns',{method:'POST',headers:{'content-type':'application/json',accept:'application/json'},body:JSON.stringify(payload)});
+        const response=await fetch('/api/campaigns',{method:'POST',headers:campaignHeaders({'content-type':'application/json'}),body:JSON.stringify(payload)});
         if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`save ${response.status}`);const data=await response.json();if(data.available===false)throw new Error('campaign storage unavailable');if(data.record?.id)campaignCloud.id=Number(data.record.id);if($('syncStatus'))$('syncStatus').textContent='CLOUD SAVED';
         if(status!=='active'){campaignCloud.id=null;await loadCampaignRecords();}
       }catch{campaignCloud.offline=true;writeLocalCampaign(status,payload);useLocalCampaign();if($('syncStatus'))$('syncStatus').textContent='LOCAL SAVE';}
@@ -1772,7 +1854,7 @@ import { AudioSystem } from '/audio.js';
     async function loadCampaignRecords(){
       if($('syncStatus'))$('syncStatus').textContent='CONNECTING';
       try{
-        const response=await fetch('/api/campaigns',{headers:{accept:'application/json'}});if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`load ${response.status}`);const data=await response.json();if(data.available===false)throw new Error('campaign storage unavailable');campaignCloud.offline=false;campaignCloud.records=Array.isArray(data.records)?data.records:[];campaignCloud.active=data.active||null;campaignCloud.remoteBest=Number(data.best_score||0);if(data.career)for(const key of Object.keys(career))career[key]=Number(data.career[key]||0);renderCampaignRecords();renderArsenal();if($('syncStatus'))$('syncStatus').textContent='CLOUD READY';
+        const response=await fetch('/api/campaigns',{headers:campaignHeaders()});if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`load ${response.status}`);const data=await response.json();if(data.available===false)throw new Error('campaign storage unavailable');campaignCloud.offline=false;campaignCloud.records=Array.isArray(data.records)?data.records:[];campaignCloud.active=data.active||null;campaignCloud.remoteBest=Number(data.best_score||0);if(data.career)for(const key of Object.keys(career))career[key]=Number(data.career[key]||0);renderCampaignRecords();renderArsenal();if($('syncStatus'))$('syncStatus').textContent='CLOUD READY';
       }catch{useLocalCampaign();if($('syncStatus'))$('syncStatus').textContent=campaignCloud.active||campaignCloud.records.length?'LOCAL SAVE':'SAVE UNAVAILABLE';}
       loadLeaderboard();
     }
@@ -1808,6 +1890,8 @@ import { AudioSystem } from '/audio.js';
 
     const LOCAL_BOARD_KEY='neon-breach-board-v1';
     const CALLSIGN_KEY='neon-breach-callsign';
+    const PARTY_KEY='neon-breach-party';
+    let leaderboardOpFilter=null; // null = all operations
 
     function getCallsign(){
       try{
@@ -1823,62 +1907,113 @@ import { AudioSystem } from '/audio.js';
       const input=$('settingCallsign');if(input)input.value=final;
       return final;
     }
+    function getPartyCode(){
+      try{
+        const saved=localStorage.getItem(PARTY_KEY);
+        if(saved&&/^[A-Z0-9]{3,12}$/.test(saved))return saved;
+      }catch{}
+      return '';
+    }
+    function setPartyCode(value){
+      const clean=String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,12);
+      const final=clean.length>=3?clean:'';
+      try{
+        if(final)localStorage.setItem(PARTY_KEY,final);
+        else localStorage.removeItem(PARTY_KEY);
+      }catch{}
+      const input=$('settingPartyCode');if(input)input.value=final;
+      const badge=$('partyBadge');if(badge){badge.textContent=final?`PARTY ${final}`:'WORLD';badge.classList.toggle('active',!!final);}
+      return final;
+    }
+    function createPartyCode(){
+      const bytes=new Uint8Array(6);
+      (crypto.getRandomValues?crypto.getRandomValues(bytes):bytes.fill(3));
+      const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let code='';
+      for(let i=0;i<6;i++)code+=alphabet[bytes[i]%alphabet.length];
+      return setPartyCode(code);
+    }
     function readLocalBoard(){
       try{const raw=JSON.parse(localStorage.getItem(LOCAL_BOARD_KEY)||'[]');return Array.isArray(raw)?raw:[];}catch{return [];}
     }
     function writeLocalBoard(entries){
-      try{localStorage.setItem(LOCAL_BOARD_KEY,JSON.stringify(entries.slice(0,40)));}catch{}
+      try{localStorage.setItem(LOCAL_BOARD_KEY,JSON.stringify(entries.slice(0,200)));}catch{}
     }
     function pushLocalBoard(entry){
+      // Client-side best-per-callsign+op mirror of server upsert
       const board=readLocalBoard();
-      board.push(entry);
+      const callsign=String(entry.callsign||'OPERATIVE').toUpperCase();
+      const operation=Number(entry.operation||0);
+      const idx=board.findIndex(r=>String(r.callsign||'').toUpperCase()===callsign&&Number(r.operation||0)===operation);
+      if(idx>=0){
+        if(Number(entry.score)>Number(board[idx].score||0))board[idx]=entry;
+      }else board.push(entry);
       board.sort((a,b)=>Number(b.score||0)-Number(a.score||0)||Number(b.at||0)-Number(a.at||0));
       writeLocalBoard(board);
       return board;
     }
     function boardToEntries(board,mineCallsign){
       const me=String(mineCallsign||getCallsign()).toUpperCase();
-      return board.slice(0,20).map((e,i)=>({
-        rank:i+1,
-        callsign:e.callsign||'OPERATIVE',
-        best_score:Number(e.score||e.best_score||0),
-        kills:Number(e.kills||0),
-        grade:e.grade||'—',
-        victory:!!e.victory,
-        difficulty:e.difficulty||'operative',
-        operation:e.operation??0,
-        you:String(e.callsign||'').toUpperCase()===me,
-        at:e.at||0
-      }));
-    }
-    function mergeBoards(remote,local){
-      const map=new Map();
-      const key=e=>`${String(e.callsign||'').toUpperCase()}|${Number(e.score||e.best_score||0)}|${e.at||0}`;
-      for(const e of [...(remote||[]),...(local||[])]){
+      // Best per callsign for display list
+      const best=new Map();
+      for(const e of board||[]){
+        const key=String(e.callsign||'OPERATIVE').toUpperCase();
         const score=Number(e.score||e.best_score||0);
-        if(score<=0)continue;
-        const k=key(e);
-        if(!map.has(k))map.set(k,{
+        const prev=best.get(key);
+        if(!prev||score>Number(prev.score||0))best.set(key,e);
+      }
+      return [...best.values()]
+        .sort((a,b)=>Number(b.score||b.best_score||0)-Number(a.score||a.best_score||0))
+        .slice(0,50)
+        .map((e,i)=>({
+          rank:i+1,
           callsign:e.callsign||'OPERATIVE',
-          score,
+          best_score:Number(e.score||e.best_score||0),
           kills:Number(e.kills||0),
           grade:e.grade||'—',
           victory:!!e.victory,
           difficulty:e.difficulty||'operative',
           operation:e.operation??0,
+          you:String(e.callsign||'').toUpperCase()===me,
           at:e.at||0
-        });
+        }));
+    }
+    function mergeBoards(remote,local){
+      const map=new Map();
+      const key=e=>`${String(e.callsign||'').toUpperCase()}|${Number(e.operation||0)}`;
+      for(const e of [...(remote||[]),...(local||[])]){
+        const score=Number(e.score||e.best_score||0);
+        if(score<=0)continue;
+        const k=key(e);
+        const prev=map.get(k);
+        if(!prev||score>Number(prev.score||0)){
+          map.set(k,{
+            callsign:e.callsign||'OPERATIVE',
+            score,
+            kills:Number(e.kills||0),
+            grade:e.grade||'—',
+            victory:!!e.victory,
+            difficulty:e.difficulty||'operative',
+            operation:e.operation??0,
+            at:e.at||0
+          });
+        }
       }
       return [...map.values()].sort((a,b)=>b.score-a.score||b.at-a.at);
     }
 
     async function loadLeaderboard(){
       const status=$('leaderboardStatus');if(status)status.textContent='LOADING…';
-      const local=readLocalBoard();
+      const party=getPartyCode();
+      let local=readLocalBoard();
+      if(leaderboardOpFilter!=null)local=local.filter(e=>Number(e.operation||0)===leaderboardOpFilter);
       let remote=[];
       let source='device';
       try{
-        const response=await fetch('/api/leaderboard',{headers:{accept:'application/json'}});
+        const qs=new URLSearchParams();
+        if(party)qs.set('party',party);
+        if(leaderboardOpFilter!=null)qs.set('operation',String(leaderboardOpFilter));
+        const response=await fetch(`/api/leaderboard?${qs}`,{headers:{accept:'application/json'}});
         if(response.ok){
           const data=await response.json();
           if(data.available!==false&&Array.isArray(data.entries)){
@@ -1892,7 +2027,8 @@ import { AudioSystem } from '/audio.js';
               operation:e.operation,
               at:e.at||0
             }));
-            source=data.source==='netlify'?'WORLD BOARD'
+            source=party?'PARTY'
+              :data.source==='netlify'?'WORLD BOARD'
               :data.source==='party'?'PARTY LAN'
               :'CLOUD';
           }
@@ -1901,16 +2037,19 @@ import { AudioSystem } from '/audio.js';
       const merged=mergeBoards(remote,local);
       renderLeaderboard(boardToEntries(merged));
       if(status){
-        if(!merged.length)status.textContent='BE THE FIRST';
+        const partyBit=party?`PARTY ${party} · `:'';
+        if(!merged.length)status.textContent=partyBit+'BE THE FIRST';
+        else if(source==='PARTY')status.textContent=`PARTY ${party} · LIVE`;
         else if(source==='WORLD BOARD')status.textContent='WORLD BOARD · LIVE';
         else if(source==='PARTY LAN')status.textContent='PARTY LAN · LIVE';
         else if(source==='CLOUD')status.textContent='CLOUD RANKS';
-        else status.textContent=`DEVICE · ${merged.length} RUNS`;
+        else status.textContent=`${partyBit}DEVICE · ${merged.length} RUNS`;
       }
     }
 
     async function submitPartyScore(payload){
       const callsign=getCallsign();
+      const party=getPartyCode();
       const entry={
         callsign,
         score:Math.max(0,Math.floor(Number(payload.score)||0)),
@@ -1920,6 +2059,8 @@ import { AudioSystem } from '/audio.js';
         operation:Number(payload.operation||0),
         difficulty:payload.difficulty||'operative',
         time_of_day:payload.time_of_day||'day',
+        elapsed_seconds:Math.floor(Number(payload.elapsed_seconds??state.totalTime)||0),
+        party:party||undefined,
         at:Date.now()
       };
       if(entry.score<=0)return null;
@@ -1937,17 +2078,27 @@ import { AudioSystem } from '/audio.js';
             callsign:e.callsign,score:e.best_score||e.score,kills:e.kills,grade:e.grade,victory:e.victory,difficulty:e.difficulty,operation:e.operation,at:e.at
           }))));
           rank=data.rank||null;
-          if(rank)showMessage(`PARTY RANK #${rank} // ${callsign}`);
+          if(rank)showMessage(`${party?'PARTY':'BOARD'} RANK #${rank} // ${callsign}`);
           return rank;
         }
       }catch{}
-      // Offline — compute rank from device board.
-      const local=boardToEntries(readLocalBoard());
+      const local=boardToEntries(readLocalBoard().filter(e=>leaderboardOpFilter==null||Number(e.operation||0)===leaderboardOpFilter));
       renderLeaderboard(local);
       const hit=local.find(e=>e.you&&Number(e.best_score)===entry.score);
-      rank=hit?.rank||local.findIndex(e=>Number(e.best_score)===entry.score&&e.callsign===callsign)+1||null;
+      rank=hit?.rank||null;
       if(rank)showMessage(`DEVICE RANK #${rank} // ${callsign}`);
       return rank||null;
+    }
+
+    function sendTelemetry(event,extra={}){
+      try{
+        const body=JSON.stringify({event,difficulty:state.difficulty,...extra});
+        if(navigator.sendBeacon){
+          const blob=new Blob([body],{type:'application/json'});
+          if(navigator.sendBeacon('/api/telemetry',blob))return;
+        }
+        fetch('/api/telemetry',{method:'POST',headers:{'content-type':'application/json'},body,keepalive:true}).catch(()=>{});
+      }catch{}
     }
 
     function renderLeaderboard(entries){
@@ -1987,8 +2138,10 @@ import { AudioSystem } from '/audio.js';
       }
     }
     function shareInvite(){
-      const url=location.href;
-      shareText(`Play NEON BREACH with me — tactical FPS from Lummy Labs.\n${url}\nBeat my score on the party board!`,'NEON BREACH');
+      const party=getPartyCode();
+      let url=location.href.split('?')[0].split('#')[0];
+      if(party)url+=`?party=${encodeURIComponent(party)}`;
+      shareText(`Play NEON BREACH with me — tactical FPS from Lummy Labs.\n${url}\n${party?`Join party ${party} and beat my score!`:'Beat my score on the party board!'}`,'NEON BREACH');
     }
     function shareLastScore(){
       const btn=$('shareScoreButton');
@@ -2186,4 +2339,12 @@ import { AudioSystem } from '/audio.js';
     else if(webgl2Available)import('/scene3d.js').catch(error=>window.__NEON_3D__.fail(error));
     else window.__NEON_3D__.fail(new Error('WebGL2 context unavailable'));
     if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
-    let preferredTime='day',preferredAutoLock=true,preferredGore=true,preferredOperation=0;try{preferredTime=localStorage.getItem('neon-breach-time')||'day';preferredAutoLock=localStorage.getItem('neon-breach-auto-lock')!=='off';preferredGore=localStorage.getItem('neon-breach-gore')!=='off';preferredOperation=Number(localStorage.getItem('neon-breach-operation')||0);}catch{}setMissionTime(preferredTime,false);setAutoLock(preferredAutoLock,false,false);setGore(preferredGore,false);setOperation(preferredOperation,false);renderArsenal();renderDailyPanel();updateBestScore();loadCampaignRecords();initAssets();resize();setupTouch();render();runBootSplash();armMenuMusicOnGesture();requestAnimationFrame(frame);
+    let preferredTime='day',preferredAutoLock=true,preferredGore=true,preferredOperation=0;try{preferredTime=localStorage.getItem('neon-breach-time')||'day';preferredAutoLock=localStorage.getItem('neon-breach-auto-lock')!=='off';preferredGore=localStorage.getItem('neon-breach-gore')!=='off';preferredOperation=Number(localStorage.getItem('neon-breach-operation')||0);}catch{}
+    // Join party via shared link ?party=CODE
+    try{
+      const partyParam=new URLSearchParams(location.search).get('party');
+      if(partyParam)setPartyCode(partyParam);
+      else setPartyCode(getPartyCode());
+    }catch{setPartyCode(getPartyCode());}
+    getSyncCode();
+    setMissionTime(preferredTime,false);setAutoLock(preferredAutoLock,false,false);setGore(preferredGore,false);setOperation(preferredOperation,false);renderArsenal();renderDailyPanel();updateBestScore();loadCampaignRecords();initAssets();resize();setupTouch();render();runBootSplash();armMenuMusicOnGesture();sendTelemetry('loaded');requestAnimationFrame(frame);

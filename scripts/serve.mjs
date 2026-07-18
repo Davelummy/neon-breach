@@ -3,6 +3,12 @@ import { createServer } from 'node:http';
 import { extname, join } from 'node:path';
 import { networkInterfaces } from 'node:os';
 import { resolveStaticPath } from './static-path.mjs';
+import {
+  sanitizePartyCode,
+  validateScoreEntry,
+  upsertEntry,
+  rankBoard
+} from '../server/leaderboard-rules.mjs';
 
 // Prefer public/ for local play so source edits apply immediately.
 // Production: SERVE_DIST=1 npm start   or   node scripts/serve.mjs --dist
@@ -34,7 +40,7 @@ function json(response, status, body, extra = {}) {
     'Cache-Control': 'no-store',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'content-type, accept',
+    'Access-Control-Allow-Headers': 'content-type, accept, x-neon-profile',
     ...extra
   });
   response.end(JSON.stringify(body));
@@ -55,63 +61,36 @@ function readBody(request) {
   });
 }
 
-// —— Party leaderboard (file-backed, works out of the box on LAN) ——
+// —— Party leaderboard (file-backed LAN; mirrors Netlify rules) ——
 const dataDir = join(process.cwd(), '.data');
-const boardPath = join(dataDir, 'leaderboard.json');
-const MAX_BOARD = 40;
 
-function ensureBoardFile() {
+function ensureDataDir() {
   if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
-  if (!existsSync(boardPath)) writeFileSync(boardPath, '[]', 'utf8');
 }
 
-function loadBoard() {
+function boardFile(party) {
+  const code = sanitizePartyCode(party);
+  return join(dataDir, code ? `leaderboard-party-${code}.json` : 'leaderboard.json');
+}
+
+function loadBoard(party) {
   try {
-    ensureBoardFile();
-    const raw = JSON.parse(readFileSync(boardPath, 'utf8'));
+    ensureDataDir();
+    const path = boardFile(party);
+    if (!existsSync(path)) return [];
+    const raw = JSON.parse(readFileSync(path, 'utf8'));
     return Array.isArray(raw) ? raw : [];
   } catch {
     return [];
   }
 }
 
-function saveBoard(entries) {
-  ensureBoardFile();
-  writeFileSync(boardPath, JSON.stringify(entries.slice(0, MAX_BOARD), null, 0), 'utf8');
+function saveBoard(party, entries) {
+  ensureDataDir();
+  writeFileSync(boardFile(party), JSON.stringify(entries, null, 0), 'utf8');
 }
 
-function sanitizeCallsign(value) {
-  const clean = String(value || '')
-    .toUpperCase()
-    .replace(/[^A-Z0-9_\- ]/g, '')
-    .trim()
-    .slice(0, 16);
-  return clean.length >= 2 ? clean : 'OPERATIVE';
-}
-
-function rankedEntries(board) {
-  return board
-    .slice()
-    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0) || Number(b.at || 0) - Number(a.at || 0))
-    .slice(0, 25)
-    .map((entry, index) => ({
-      rank: index + 1,
-      callsign: entry.callsign,
-      best_score: Number(entry.score || 0),
-      score: Number(entry.score || 0),
-      kills: Number(entry.kills || 0),
-      grade: entry.grade || '—',
-      victory: !!entry.victory,
-      operation: entry.operation ?? 0,
-      difficulty: entry.difficulty || 'operative',
-      time_of_day: entry.time_of_day || 'day',
-      victories: entry.victory ? 1 : 0,
-      at: entry.at || 0,
-      you: false
-    }));
-}
-
-async function handleLeaderboard(request, response) {
+async function handleLeaderboard(request, response, url) {
   if (request.method === 'OPTIONS') {
     response.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
@@ -122,53 +101,47 @@ async function handleLeaderboard(request, response) {
   }
 
   if (request.method === 'GET') {
-    const entries = rankedEntries(loadBoard());
+    const party = sanitizePartyCode(url.searchParams.get('party') || '');
+    const opRaw = url.searchParams.get('operation');
+    const operation =
+      opRaw === null || opRaw === '' || opRaw === 'all' ? null : Math.floor(Number(opRaw));
+    const board = loadBoard(party);
+    const entries = rankBoard(board, {
+      operation: Number.isFinite(operation) ? operation : null
+    });
     return json(response, 200, {
       available: true,
       source: 'party',
       entries,
-      count: entries.length
+      count: entries.length,
+      party: party || null
     });
   }
 
   if (request.method === 'POST') {
     let body;
     try {
-      body = JSON.parse(await readBody(request) || '{}');
+      body = JSON.parse((await readBody(request)) || '{}');
     } catch {
       return json(response, 400, { error: 'Invalid JSON body.' });
     }
-    const score = Math.max(0, Math.min(9_999_999, Math.floor(Number(body.score) || 0)));
-    if (score <= 0) return json(response, 400, { error: 'Score must be positive.' });
-
-    const entry = {
-      callsign: sanitizeCallsign(body.callsign),
-      score,
-      kills: Math.max(0, Math.min(9999, Math.floor(Number(body.kills) || 0))),
-      grade: String(body.grade || '—').slice(0, 2).toUpperCase(),
-      victory: !!body.victory,
-      operation: Math.max(0, Math.min(9, Math.floor(Number(body.operation) || 0))),
-      difficulty: ['recruit', 'operative', 'nightmare'].includes(body.difficulty) ? body.difficulty : 'operative',
-      time_of_day: body.time_of_day === 'night' ? 'night' : 'day',
-      at: Date.now()
-    };
-
-    const board = loadBoard();
-    board.push(entry);
-    board.sort((a, b) => b.score - a.score || b.at - a.at);
-    saveBoard(board.slice(0, MAX_BOARD));
-
-    const ranked = rankedEntries(board);
-    const mine = ranked.findIndex(
-      row => row.callsign === entry.callsign && row.best_score === entry.score && Math.abs((row.at || 0) - entry.at) < 5
+    const validated = validateScoreEntry(body);
+    if (!validated.ok) return json(response, 400, { error: validated.error });
+    const entry = validated.entry;
+    const board = upsertEntry(loadBoard(entry.party), entry);
+    saveBoard(entry.party, board);
+    // Rank on the unfiltered board the client renders (matches Netlify function).
+    const ranked = rankBoard(board, { operation: null });
+    const mine = ranked.find(
+      row => row.callsign === entry.callsign && row.best_score === entry.score
     );
-
     return json(response, 200, {
       available: true,
       source: 'party',
       ok: true,
-      rank: mine >= 0 ? mine + 1 : null,
-      entries: ranked
+      rank: mine?.rank ?? null,
+      entries: ranked,
+      party: entry.party || null
     });
   }
 
@@ -199,13 +172,18 @@ createServer(async (request, response) => {
     if (pathname === '/health') return json(response, 200, { status: 'ok', game: 'NEON BREACH' });
 
     if (pathname.startsWith('/api/')) {
+      const url = new URL(request.url, 'http://localhost');
       if (pathname === '/api/campaigns') {
         return json(response, 200, {
           available: false,
           error: 'Campaign cloud is optional — progress is saved on this device.'
         });
       }
-      if (pathname === '/api/leaderboard') return handleLeaderboard(request, response);
+      if (pathname === '/api/leaderboard') return handleLeaderboard(request, response, url);
+      if (pathname === '/api/telemetry') {
+        // Local no-op — production Netlify function aggregates anonymously.
+        return json(response, 202, { ok: true, local: true });
+      }
       return json(response, 404, { error: 'API route not found.' });
     }
 

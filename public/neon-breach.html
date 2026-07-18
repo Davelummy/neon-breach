@@ -800,6 +800,22 @@
           <input id="settingCallsign" type="text" maxlength="16" placeholder="OPERATIVE" autocomplete="nickname" spellcheck="false">
         </div>
         <div class="setting-row">
+          <div><label>Transfer code</label><small>Enter on another device to sync progress</small></div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            <input id="settingSyncCode" type="text" maxlength="24" placeholder="CODE" spellcheck="false" style="width:110px">
+            <button type="button" id="copySyncCode" class="secondary" style="width:auto;margin:0;padding:8px 10px">Copy</button>
+            <button type="button" id="applySyncCode" class="secondary" style="width:auto;margin:0;padding:8px 10px">Apply</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div><label>Party code <span id="partyBadge" class="micro">WORLD</span></label><small>Shared board for your group · blank = world</small></div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            <input id="settingPartyCode" type="text" maxlength="12" placeholder="PARTY" spellcheck="false" style="width:90px">
+            <button type="button" id="createPartyCode" class="secondary" style="width:auto;margin:0;padding:8px 10px">Create</button>
+            <button type="button" id="leavePartyCode" class="secondary" style="width:auto;margin:0;padding:8px 10px">Leave</button>
+          </div>
+        </div>
+        <div class="setting-row">
           <div><label>Family mode</label><small>More health · gentler damage · stronger aim assist</small></div>
           <button id="familyModeButton" aria-pressed="false">Off</button>
         </div>
@@ -857,8 +873,9 @@
     <div id="screenRanks" class="menu-screen">
       <div class="menu-panel">
         <h2>Party ranks</h2>
-        <p class="sub">Best scores on this device &amp; Wi‑Fi host. Set your callsign in Settings.</p>
+        <p class="sub">World board on Netlify · party codes for private groups · callsign in Settings.</p>
         <div class="campaign-head"><div class="micro">Leaderboard</div><span id="leaderboardStatus">…</span></div>
+        <div id="rankOpFilter" class="difficulty" style="margin:10px 0 4px"></div>
         <div id="leaderboardRows" class="scroll-panel" style="max-height:min(52vh,420px)"></div>
         <div class="share-row">
           <button id="refreshRanksButton" class="secondary">Refresh</button>

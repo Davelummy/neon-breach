@@ -1,4 +1,4 @@
-const CACHE = 'neon-breach-v67-world-board';
+const CACHE = 'neon-breach-__BUILD_HASH__';
 const CORE = ['/', '/manifest.webmanifest', '/icon.svg', '/game.js', '/data.js', '/audio.js', '/scene3d.js', '/render-utils.js', '/vendor/three.module.min.js', '/vendor/three.core.min.js'];
 
 self.addEventListener('install', event => {
@@ -11,7 +11,11 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
-  if (new URL(event.request.url).pathname.startsWith('/api/')) return;
+  let url;
+  try { url = new URL(event.request.url); } catch { return; }
+  // Only cache same-origin assets — never third-party GETs.
+  if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith('/api/')) return;
   event.respondWith(fetch(event.request).then(response => {
     const copy = response.clone();
     caches.open(CACHE).then(cache => cache.put(event.request, copy));
