@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import * as esbuild from 'esbuild';
 
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist/server', { recursive: true });
@@ -11,15 +13,51 @@ await cp('public/neon-breach.html', 'dist/index.html');
 await cp('.openai/hosting.json', 'dist/.openai/hosting.json');
 await cp('drizzle', 'dist/.openai/drizzle', { recursive: true });
 
+async function minifyEsm(code, label) {
+  try {
+    const result = await esbuild.transform(code, {
+      loader: 'js',
+      minify: true,
+      format: 'esm',
+      target: ['es2020'],
+      legalComments: 'none'
+    });
+    return result.code;
+  } catch (error) {
+    console.warn(`minify skipped for ${label}:`, error?.message || error);
+    return code;
+  }
+}
+
 const html = await readFile('public/neon-breach.html', 'utf8');
 const manifest = await readFile('public/manifest.webmanifest', 'utf8');
-const serviceWorker = await readFile('public/sw.js', 'utf8');
 const icon = await readFile('public/icon.svg', 'utf8');
-const scene3d = await readFile('public/scene3d.js', 'utf8');
-const renderUtils = await readFile('public/render-utils.js', 'utf8');
-const gameJs = await readFile('public/game.js', 'utf8');
-const dataJs = await readFile('public/data.js', 'utf8');
-const audioJs = await readFile('public/audio.js', 'utf8');
+let scene3d = await readFile('public/scene3d.js', 'utf8');
+let renderUtils = await readFile('public/render-utils.js', 'utf8');
+let gameJs = await readFile('public/game.js', 'utf8');
+let dataJs = await readFile('public/data.js', 'utf8');
+let audioJs = await readFile('public/audio.js', 'utf8');
+let serviceWorker = await readFile('public/sw.js', 'utf8');
+
+// Minify hand-wired ES modules in place (filenames unchanged).
+gameJs = await minifyEsm(gameJs, 'game.js');
+scene3d = await minifyEsm(scene3d, 'scene3d.js');
+dataJs = await minifyEsm(dataJs, 'data.js');
+audioJs = await minifyEsm(audioJs, 'audio.js');
+renderUtils = await minifyEsm(renderUtils, 'render-utils.js');
+
+// Content hash for service worker cache busting (dist only).
+const hashSource = [html, gameJs, scene3d, dataJs, audioJs, renderUtils].join('\n');
+const buildHash = createHash('sha256').update(hashSource).digest('hex').slice(0, 12);
+serviceWorker = serviceWorker.replaceAll('__BUILD_HASH__', buildHash);
+
+await writeFile('dist/game.js', gameJs);
+await writeFile('dist/scene3d.js', scene3d);
+await writeFile('dist/data.js', dataJs);
+await writeFile('dist/audio.js', audioJs);
+await writeFile('dist/render-utils.js', renderUtils);
+await writeFile('dist/sw.js', serviceWorker);
+
 const threeModule = await readFile('node_modules/three/build/three.module.min.js', 'utf8');
 const threeCore = await readFile('node_modules/three/build/three.core.min.js', 'utf8');
 const binaryAssets = {};
@@ -197,4 +235,4 @@ export const fetch = handler.fetch;
 
 await writeFile('dist/server/index.js', worker.trimStart());
 
-console.log('NEON BREACH deployable build ready in dist/');
+console.log(`NEON BREACH deployable build ready in dist/ (sw cache neon-breach-${buildHash})`);

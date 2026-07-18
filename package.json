@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "drizzle-kit": "0.31.10",
+    "esbuild": "^0.28.1",
     "puppeteer-core": "^25.3.0"
   }
 }

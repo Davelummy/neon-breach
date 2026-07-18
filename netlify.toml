@@ -35,6 +35,13 @@
   status = 200
   force = true
 
+# Anonymous aggregate telemetry
+[[redirects]]
+  from = "/api/telemetry"
+  to = "/.netlify/functions/telemetry"
+  status = 200
+  force = true
+
 # SPA-style: unknown paths serve the game shell
 [[redirects]]
   from = "/*"

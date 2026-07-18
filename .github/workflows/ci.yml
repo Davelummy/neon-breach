@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+      - name: Dist module sanity
+        run: node --input-type=module -e "import('./dist/data.js').then(() => console.log('data ok'))"
+
+  qa-smoke:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Install Chrome headless shell
+        run: npx --yes @puppeteer/browsers install chrome-headless-shell@stable
+      - name: QA smoke
+        run: npm run qa
+        env:
+          CI: '1'
