@@ -841,6 +841,7 @@ import { AudioSystem } from '/audio.js';
 
     function ensureAudio(){
       if(!audio) audio=new AudioSystem(()=>state.muted);
+      audio?.preloadVoices?.(['breach-inbound','sector-clear','mission-complete','hvt-down','vehicle-lost','game-over','victory']);
       // Browsers suspend AudioContext until a user gesture — always try to wake it.
       try{audio.resume?.();}catch{}
       try{if(audio.ctx?.state==='suspended')audio.ctx.resume();}catch{}
@@ -920,6 +921,7 @@ import { AudioSystem } from '/audio.js';
     }
 
     function endGame(victory=false){
+      audio?.say(victory?'victory':'game-over',true);
       state.mode=victory?'victory':'gameover';player.alive=false;state.finisherCam=null;input.fire=input.shiftFire=input.pointerFire=input.aim=input.jump=false;document.exitPointerLock?.();$('touchControls').classList.add('hidden');updateNightVision();
       const op=currentOp();
       $('modalEyebrow').textContent=victory?'MISSION COMPLETE':'KIA';$('modalTitle').textContent=victory?`${op.name}`:'Failed';
@@ -1051,7 +1053,7 @@ import { AudioSystem } from '/audio.js';
       state.missionStage=stage;state.wave=stage+1;state.missionProgress=0;state.objective=def.objective;state.objectiveTarget=[...def.target];
       if(def.type==='defend'){state.missionHold=def.hold;state.missionSpawnStep=0;}
       if(def.type==='destroy')armDestroyNodes(def);else state.destroyNodes=[];
-      audio?.wave();showAnnouncement(def.title,def.objective,2.2);showComms('Command',def.comms,5.2);player.shield=Math.min(player.maxShield,player.shield+12);player.armor=Math.min(player.maxArmor,player.armor+8);player.reserve=Math.min(Math.ceil(weaponConfig().reserve*1.5),player.reserve+Math.ceil(weaponConfig().mag*.6));
+      audio?.wave();audio?.say('breach-inbound');showAnnouncement(def.title,def.objective,2.2);showComms('Command',def.comms,5.2);player.shield=Math.min(player.maxShield,player.shield+12);player.armor=Math.min(player.maxArmor,player.armor+8);player.reserve=Math.min(Math.ceil(weaponConfig().reserve*1.5),player.reserve+Math.ceil(weaponConfig().mag*.6));
       spawnMissionSquad(def);
       maybeStageVehicle(stage);
       saveCampaign('active',true);
@@ -1112,19 +1114,19 @@ import { AudioSystem } from '/audio.js';
       }else if(def.type==='extract'){
         if(player.carIndex>=0&&!state.extractionArmed){state.extractionArmed=true;state.objective=def.armObjective;state.objectiveTarget=[...def.beacon];showAnnouncement('EXTRACTION ROUTE',def.armAnnounce||'FOLLOW THE BEACON // BOOST AUTHORIZED',1.7);showComms('ARES COMMAND',def.armComms,4.2);}
         const extractionDist=Math.hypot(state.objectiveTarget[0]-player.x,state.objectiveTarget[1]-player.y);state.missionProgress=state.extractionArmed?Math.max(.35,1-extractionDist/15):.18;
-        if(state.extractionArmed&&player.carIndex>=0&&extractionDist<1.55){state.wavePhase='complete';state.waveTimer=2.5;state.missionProgress=1;showAnnouncement('MISSION COMPLETE','UNIT 07 // EXTRACTION CONFIRMED',2.4);showComms('ARES COMMAND',currentOp().debriefComms,4.5);}
+        if(state.extractionArmed&&player.carIndex>=0&&extractionDist<1.55){state.wavePhase='complete';state.waveTimer=2.5;state.missionProgress=1;audio?.say('mission-complete');showAnnouncement('MISSION COMPLETE','UNIT 07 // EXTRACTION CONFIRMED',2.4);showComms('ARES COMMAND',currentOp().debriefComms,4.5);}
       }
     }
 
     function startWave(){
       state.wave++;state.wavePhase='active';state.pending=[...WAVE_TABLE[state.wave-1]];state.initialWaveCount=state.pending.length;state.spawnTimer=.25;state.eliteSpawned=false;state.objective=MISSIONS[state.wave-1].objective;
-      audio?.wave();showAnnouncement(MISSIONS[state.wave-1].title,state.objective,2.4);
+      audio?.wave();audio?.say('breach-inbound');showAnnouncement(MISSIONS[state.wave-1].title,state.objective,2.4);
     }
 
     function completeWave(){
       if(state.wave>=5){state.wavePhase='complete';state.waveTimer=2.6;showAnnouncement('GRID CLEAR','HOSTILE SIGNAL COLLAPSING',2.3);return;}
       state.wavePhase='between';state.waveTimer=4;player.shield=Math.min(player.maxShield,player.shield+18);player.armor=Math.min(player.maxArmor,player.armor+14);player.reserve=Math.min(Math.ceil(weaponConfig().reserve*1.5),player.reserve+Math.max(8,weaponConfig().mag));
-      showAnnouncement('SECTOR CLEAR',`BREACH 0${state.wave+1} INBOUND // PROGRESS SAVED`,2.4);saveCampaign('active',true);
+      audio?.say('sector-clear');showAnnouncement('SECTOR CLEAR',`BREACH 0${state.wave+1} INBOUND // PROGRESS SAVED`,2.4);saveCampaign('active',true);
     }
 
     function spawnEnemy(type,forcedPos=null,options={}){
@@ -1419,7 +1421,7 @@ import { AudioSystem } from '/audio.js';
     function killEnemy(e,critical,method='shot'){
       if(e.dead)return;e.dead=true;const spec=ENEMY_TYPES[e.type];player.kills++;player.combo=Math.min(8,player.combo+1);player.comboTimer=3.2;state.comboPeak=Math.max(state.comboPeak,player.combo);
       const methodBonus=method==='takedown'?1.4:method==='roadkill'?1.3:method==='headshot'?1.2:1,eliteBonus=e.elite?1.75:1,gain=Math.round(spec.score*player.combo*(critical?1.25:1)*methodBonus*eliteBonus);player.score+=gain;audio?.kill();$('combo').innerHTML=`<b>x${player.combo} CHAIN</b><small>${e.elite?'ELITE // ':''}${method.toUpperCase()} +${gain}</small>`;$('combo').classList.add('show');
-      if(e.commander){const hvt=missionStages().find(s=>s.type==='hvt');showAnnouncement('HVT NEUTRALIZED',`${hvt?.title||'TARGET'} // CONFIRMED`,1.5);showComms('ARES COMMAND',hvt?.confirmComms||'Target confirmed down. Move to your next objective immediately.',4.6);state.screenShake=1;}
+      if(e.commander){const hvt=missionStages().find(s=>s.type==='hvt');audio?.say('hvt-down');showAnnouncement('HVT NEUTRALIZED',`${hvt?.title||'TARGET'} // CONFIRMED`,1.5);showComms('ARES COMMAND',hvt?.confirmComms||'Target confirmed down. Move to your next objective immediately.',4.6);state.screenShake=1;}
       else if(e.elite){showMessage(`ELITE ${spec.name} ELIMINATED`);state.screenShake=Math.max(state.screenShake,.7);}
       if(state.gore){spawnBlood(e.x,e.y,e.elite?2.2:1.55);state.bloodDecals.push({x:e.x+(Math.random()-.5)*.16,y:e.y+(Math.random()-.5)*.16,z:e.z||GROUND_HEIGHT,size:(e.elite?.5:.34)+Math.random()*.18,alpha:.72});if(state.bloodDecals.length>36)state.bloodDecals.shift();}
       // Corpses linger briefly then despawn so the district doesn't fill with bodies.
@@ -1480,7 +1482,7 @@ import { AudioSystem } from '/audio.js';
       const baseSight=state.timeOfDay==='day'?(rules.sightDay||12.5):(quiet?(rules.sightNight||6.4)*.85:(rules.sightNight||9.2));
       const sightRange=baseSight;state.squadAlert=Math.max(0,state.squadAlert-dt*(quiet?1.4:1));
       for(const e of state.enemies){
-        if(e.dead)continue;const spec=ENEMY_TYPES[e.type],wasReloading=e.reloadTimer>0;e.hitFlash=Math.max(0,e.hitFlash-dt);e.spawn=Math.max(0,e.spawn-dt*2.2);e.fireCooldown-=dt;e.meleeCooldown-=dt;e.pathTimer-=dt;e.dodgeTimer=Math.max(0,e.dodgeTimer-dt);e.dashCooldown-=dt;e.chargeCooldown-=dt;e.chargeTimer=Math.max(0,e.chargeTimer-dt);e.jumpCooldown=Math.max(0,e.jumpCooldown-dt);e.landingSquash=Math.max(0,e.landingSquash-dt*4);e.reactionTimer=Math.max(0,e.reactionTimer-dt);e.decisionTimer-=dt;e.suppression=Math.max(0,e.suppression-dt*.24);e.reloadTimer=Math.max(0,e.reloadTimer-dt);if(wasReloading&&e.reloadTimer<=0){e.rounds=e.magazineSize;e.combatState='engage';e.decisionTimer=0;}
+        if(e.dead)continue;const spec=ENEMY_TYPES[e.type],wasReloading=e.reloadTimer>0;e.hitFlash=Math.max(0,e.hitFlash-dt);e.muzzleFlash=Math.max(0,(e.muzzleFlash||0)-dt*10);e.spawn=Math.max(0,e.spawn-dt*2.2);e.fireCooldown-=dt;e.meleeCooldown-=dt;e.pathTimer-=dt;e.dodgeTimer=Math.max(0,e.dodgeTimer-dt);e.dashCooldown-=dt;e.chargeCooldown-=dt;e.chargeTimer=Math.max(0,e.chargeTimer-dt);e.jumpCooldown=Math.max(0,e.jumpCooldown-dt);e.landingSquash=Math.max(0,e.landingSquash-dt*4);e.reactionTimer=Math.max(0,e.reactionTimer-dt);e.decisionTimer-=dt;e.suppression=Math.max(0,e.suppression-dt*.24);e.reloadTimer=Math.max(0,e.reloadTimer-dt);if(wasReloading&&e.reloadTimer<=0){e.rounds=e.magazineSize;e.combatState='engage';e.decisionTimer=0;}
         const dx=player.x-e.x,dy=player.y-e.y,dist=Math.max(.01,Math.hypot(dx,dy)),canSee=dist<sightRange&&lineOfSight(e.x,e.y,player.x,player.y,Math.max(GROUND_HEIGHT,player.z));
         if(canSee){
           if(!e.hadSight){e.reactionTimer=.24+Math.random()*(state.timeOfDay==='night'?.5:.32);if(dist<11&&!e.alertSfx){audio?.enemyAlert?.(dist);e.alertSfx=true;}}
@@ -1538,7 +1540,16 @@ import { AudioSystem } from '/audio.js';
 
     function enemyShoot(e,dist){
       const spec=ENEMY_TYPES[e.type],speed=spec.projectileSpeed??5.4,travel=Math.max(.2,dist/speed),movement=Math.hypot(e.vx,e.vy),lead=spec.lead??.18,targetX=player.x+player.moveVx*travel*lead,targetY=player.y+player.moveVy*travel*lead,error=(.022+dist*.004+movement*.01+e.suppression*.075+(state.timeOfDay==='night'?.018:0))*(spec.precision??1),angle=Math.atan2(targetY-e.y,targetX-e.x)+(Math.random()-.5)*error;
-      const muzzleZ=(e.z||GROUND_HEIGHT)+.12;state.projectiles.push({x:e.x,y:e.y,z:muzzleZ,dx:Math.cos(angle)*speed,dy:Math.sin(angle)*speed,dz:(player.z-muzzleZ)/travel,life:2.3,damage:spec.damage*DIFFICULTIES[state.difficulty].enemyDamage,type:e.type,fromX:e.x,fromY:e.y});audio?.enemyShot?.(dist);
+      // Spawn from held-weapon height (~chest/shoulder), slightly forward of body along facing.
+      const muzzleZ=(e.z||GROUND_HEIGHT)+.95;
+      const fwdX=Math.cos(e.facing||angle)*.42,fwdY=Math.sin(e.facing||angle)*.42;
+      const sx=e.x+fwdX,sy=e.y+fwdY;
+      e.muzzleFlash=1;
+      e.combatState='engage';
+      state.projectiles.push({x:sx,y:sy,z:muzzleZ,dx:Math.cos(angle)*speed,dy:Math.sin(angle)*speed,dz:(player.z+.15-muzzleZ)/travel,life:2.3,damage:spec.damage*DIFFICULTIES[state.difficulty].enemyDamage,type:e.type,fromX:sx,fromY:sy});
+      // Visible sparks at the muzzle so return fire is unmistakable.
+      for(let i=0;i<3;i++)pushParticle({x:sx+(Math.random()-.5)*.08,y:sy+(Math.random()-.5)*.08,z:muzzleZ+(Math.random()-.3)*.1,vx:Math.cos(angle)*(1.2+Math.random())+(Math.random()-.5)*.4,vy:Math.sin(angle)*(1.2+Math.random())+(Math.random()-.5)*.4,vz:(Math.random()-.3)*.5,gravity:3,life:.08+Math.random()*.06,max:.16,color:i%2?'#ffbb55':'#ffe0a0'});
+      audio?.enemyShot?.(dist);
     }
 
     function updateProjectiles(dt){
@@ -1556,7 +1567,8 @@ import { AudioSystem } from '/audio.js';
           const toPlayer=Math.hypot(p.x-player.x,p.y-player.y);
           // Supersonic crack when a round passes close.
           if(!p.flyby&&toPlayer<.55&&toPlayer>.32){p.flyby=true;audio?.flyby?.(toPlayer);}
-          if(toPlayer<.3&&Math.abs(p.z-player.z)<.34){damagePlayer(p.damage);p.life=0;break;}
+          // Body volume ~ ankles to head (rounds spawn at gun height, not floor).
+          if(toPlayer<.32&&p.z>player.z-.05&&p.z<player.z+1.15){damagePlayer(p.damage);p.life=0;break;}
         }
       }
       state.projectiles=state.projectiles.filter(p=>p.life>0);
@@ -1585,7 +1597,7 @@ import { AudioSystem } from '/audio.js';
       if(car.destroyed)return;car.hp=Math.max(0,car.hp-amount);state.screenShake=Math.max(state.screenShake,.35);if(car.hp>0)return;
       car.destroyed=true;car.speed=0;spawnDeathParticles(car.x,car.y,'#ff8c57');audio?.roadkill();rumble(1,1,240);
       if(car.occupied){car.occupied=false;player.carIndex=-1;const ex=car.x+Math.cos(car.dir+Math.PI/2),ey=car.y+Math.sin(car.dir+Math.PI/2);player.x=canMove(ex,ey,.24)?ex:car.x;player.y=canMove(ex,ey,.24)?ey:car.y;player.z=GROUND_HEIGHT;damagePlayer(24);}
-      showAnnouncement('VEHICLE LOST','ARES INTERCEPTOR DESTROYED',1.2);
+      audio?.say('vehicle-lost');showAnnouncement('VEHICLE LOST','ARES INTERCEPTOR DESTROYED',1.2);
     }
 
     function dropPickup(x,y){const needs=player.health<58?'health':player.armor<38?'armor':player.ammo<Math.max(2,weaponConfig().mag*.3)?'ammo':Math.random()<.5?'shield':'ammo';state.pickups.push({kind:needs,x,y,life:15,phase:Math.random()*TAU});}

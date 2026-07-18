@@ -61,9 +61,10 @@ await writeFile('dist/sw.js', serviceWorker);
 const threeModule = await readFile('node_modules/three/build/three.module.min.js', 'utf8');
 const threeCore = await readFile('node_modules/three/build/three.core.min.js', 'utf8');
 const binaryAssets = {};
-for (const name of await readdir('public/assets')) {
-  if (!name.endsWith('.webp')) continue;
-  binaryAssets[`/assets/${name}`] = (await readFile(`public/assets/${name}`)).toString('base64');
+for (const entry of await readdir('public/assets', { withFileTypes: true, recursive: true })) {
+  if (!entry.isFile() || !/\.(webp|mp3)$/.test(entry.name)) continue;
+  const rel = `${entry.parentPath.replace(/\\/g, '/').replace(/^public\//, '')}/${entry.name}`;
+  binaryAssets[`/${rel}`] = (await readFile(`public/${rel}`)).toString('base64');
 }
 const campaignSchema = `CREATE TABLE IF NOT EXISTS campaign_records (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -211,7 +212,7 @@ const handler = {
       const bytes = Uint8Array.from(atob(binary), char => char.charCodeAt(0));
       return new Response(bytes, {
         headers: {
-          'content-type': 'image/webp',
+          'content-type': url.pathname.endsWith('.mp3') ? 'audio/mpeg' : 'image/webp',
           'cache-control': 'public, max-age=31536000, immutable'
         }
       });
