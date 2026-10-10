@@ -1,0 +1,25 @@
+# Campaign and multiplayer recovery — 2026-10-10
+
+The recovery branch is `agent/recover-community-foundation`, based on main commit `9f862a7c13eb18c1c97edf095789dd10e8499cb2`.
+
+The missing working directory was `/private/tmp/neon-breach-rebuild`. Its source was reconstructed from 636 successful recorded file changes affecting 94 files in Codex session `019f6b49-4024-7441-8342-a34867c3d948`. All recorded hunks applied without conflicts. Failed patch attempts were not replayed, and no historical commands or JavaScript were executed.
+
+Recovered areas include campaign districts and missions; tactical, responsive and controller interfaces; pickups and loadouts; vehicle damage, driving and presentation; civilian routes and the armory; radio controls; accounts and returning sessions; campaign checkpoint/local saves; community results and leaderboards; Firebase backend/emulator foundations; multiplayer rooms, movement, combat, vehicles, respawns, invitations and logout; and their tests and documentation.
+
+The npm-generated Firebase dependency entries were separately restored from the final recorded package manifest. The lockfile was regenerated offline, without package installation or install scripts, and retains Firebase 12.19.0, firebase-admin 14.5.0 and rules-unit-testing 5.0.2.
+
+## Current verification
+
+- Full `npm test`: 169 passed, zero failed. The first cold run had one server startup timeout; that test and the subsequent full suite passed.
+- `npm run build`: passed. Cache fingerprint `neon-breach-329fbcee2c2c` matches the last recorded build before the temporary folder disappeared.
+- `git diff --check`: passed.
+- Fresh browser campaign/multiplayer/responsive QA: pending. The existing browser dependency import stalled before the browser or game server launched.
+- Fresh Firebase emulator integration: pending dependency installation approval; Firebase test packages are not currently installed in this checkout.
+
+This is a recovered-source preservation snapshot, not a release or production readiness certification. No deployment, main-branch merge, or cleanup has been performed. Historical QA results are not substitutes for fresh tests.
+
+## Recovery copies and limitations
+
+A second source copy and per-file SHA-256 manifest are retained under the Codex visualization recovery directory for this session, outside this checkout. Runtime files and generated artifacts under the former ignored `.codex` directory were not recovered. That includes local pilot account/session databases, not source code. Browser-local saves and any remote Firebase data require separate verification and have not been modified.
+
+Keep both source copies until fresh QA and human review approve the recovery. Remove redundant files only after identifying their purpose and confirming that they are not the sole surviving copy.

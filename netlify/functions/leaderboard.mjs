@@ -2,11 +2,13 @@
  * World + party leaderboards (Netlify Blobs) with dedupe and write-safety.
  */
 import { getStore } from '@netlify/blobs';
+import {createAccountService} from '../../server/account-service.mjs';
 import {
   sanitizePartyCode,
   validateScoreEntry,
   upsertEntry,
-  rankBoard
+  rankBoard,
+  periodBoardKeys
 } from '../../server/leaderboard-rules.mjs';
 
 const STORE_NAME = 'neon-breach-party-board';
@@ -44,14 +46,12 @@ async function readBoard(store, key) {
     if (!result) return { board: [], etag: null, exists: false };
     const board = Array.isArray(result.data) ? result.data : [];
     return { board, etag: result.etag || null, exists: true };
-  } catch {
-    return { board: [], etag: null, exists: false };
+  } catch (error) {
+    throw error;
   }
 }
 
 async function writeBoard(store, key, board, etag, exists) {
-  const options = etag ? { onlyIfMatch: etag } : exists ? {} : { onlyIfNew: true };
-  // If we have no etag but blob may exist, unconditional setJSON is last resort after retries.
   try {
     if (etag) return await store.setJSON(key, board, { onlyIfMatch: etag });
     if (!exists) {
@@ -62,8 +62,8 @@ async function writeBoard(store, key, board, etag, exists) {
       }
       return r || { modified: true };
     }
-    await store.setJSON(key, board);
-    return { modified: true };
+    // Never overwrite a board without the version we read.
+    throw new Error('Leaderboard version unavailable.');
   } catch (error) {
     // Some runtimes return modified:false instead of throwing
     if (String(error?.message || error).toLowerCase().includes('precondition')) {
@@ -80,14 +80,10 @@ async function upsertWithRetry(store, key, entry) {
     const result = await writeBoard(store, key, next, etag, exists);
     if (result?.modified !== false) return next;
   }
-  // Final unconditional write so a score is not dropped after persistent contention
-  const { board } = await readBoard(store, key);
-  const next = upsertEntry(board, entry);
-  await store.setJSON(key, next);
-  return next;
+  throw new Error('Leaderboard busy; score remains saved on your device.');
 }
 
-export default async (req) => {
+async function handleLeaderboard(req) {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -114,9 +110,12 @@ export default async (req) => {
     const operation =
       opRaw === null || opRaw === '' || opRaw === 'all' ? null : Math.floor(Number(opRaw));
     const key = boardKey(party);
-    const { board } = await readBoard(store, key);
+    const period = url.searchParams.get('period') || 'all';
+    const difficulty = url.searchParams.get('difficulty');
+    const partitions = await Promise.all(periodBoardKeys(key, period).map(async k => (await readBoard(store, k)).board));
+    const board = partitions.flat();
     const entries = rankBoard(board, {
-      operation: Number.isFinite(operation) ? operation : null
+      operation: Number.isFinite(operation) ? operation : null, period, difficulty
     });
     return new Response(
       JSON.stringify({
@@ -141,6 +140,7 @@ export default async (req) => {
       });
     }
 
+    try{const accounts=createAccountService(getStore({name:'neon-breach-community',consistency:'strong'})),identity=await accounts.scoreIdentity(req,body.callsign);if(!identity.allowed)return Response.json({error:'Sign in to use this reserved username.'},{status:403,headers:corsHeaders});body.callsign=identity.callsign;}catch{return Response.json({error:'Account validation unavailable.'},{status:503,headers:corsHeaders});}
     const validated = validateScoreEntry(body);
     if (!validated.ok) {
       return new Response(JSON.stringify({ error: validated.error }), {
@@ -149,9 +149,10 @@ export default async (req) => {
       });
     }
 
-    const entry = validated.entry;
+    const entry = { ...validated.entry, at: Date.now() };
     const key = boardKey(entry.party);
     const board = await upsertWithRetry(store, key, entry);
+    await upsertWithRetry(store, periodBoardKeys(key, 'daily', entry.at)[0], entry);
     // Rank on the same unfiltered board the client renders, so the toast
     // matches the visible list position.
     const entries = rankBoard(board, { operation: null });
@@ -176,6 +177,11 @@ export default async (req) => {
     status: 405,
     headers: { ...corsHeaders, Allow: 'GET, POST, OPTIONS' }
   });
+}
+
+export default async req => {
+  try { return await handleLeaderboard(req); }
+  catch { return new Response(JSON.stringify({ available: false, error: 'Leaderboard temporarily unavailable.' }), { status: 503, headers: corsHeaders }); }
 };
 
 export const config = {

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Mission result · NEON BREACH</title>
+  <meta name="description" content="A NEON BREACH mission result. Play and challenge this score.">
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;padding:24px;background:#07131c;color:#effaff;font:18px/1.6 system-ui;min-height:100vh;display:grid;place-items:center}
+    main{width:min(584px,100%);padding:32px;border:1px solid #31f5db;border-radius:16px;overflow-wrap:anywhere}
+    h1{color:#31f5db} #score{font-size:64px;font-weight:800;margin:12px 0}
+    a,button{color:#07131c;background:#31f5db;border:0;border-radius:6px;padding:12px 18px;font:inherit;text-decoration:none;display:inline-block;cursor:pointer}
+    small{color:#abc2cd} [hidden]{display:none}
+  </style>
+</head>
+<body><main>
+  <h1>NEON BREACH</h1>
+  <p id="status" role="status">Loading mission result…</p>
+  <section id="result" hidden><h2 id="callsign"></h2><div id="score"></div><p id="details"></p><small>Client-reported score; no global rank or anti-cheat verification is implied.</small><p><button id="download">Download scoreboard</button></p></section>
+  <p><a href="/">Play NEON BREACH</a></p>
+</main><script type="module" src="/results.js"></script></body>
+</html>

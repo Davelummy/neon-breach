@@ -3,4 +3,8 @@
 /api/campaigns    /.netlify/functions/campaigns    200
 /api/telemetry    /.netlify/functions/telemetry    200
 /health           /.netlify/functions/health       200
+/api/community    /.netlify/functions/community    200
+/api/results      /.netlify/functions/results      200
+/api/auth/*       /.netlify/functions/accounts/:splat 200
+/api/*            /.netlify/functions/api-not-found 200
 /*                /index.html                      200

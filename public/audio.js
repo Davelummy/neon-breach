@@ -9,7 +9,14 @@ export class AudioSystem {
     this.ctx = new AC();
     this.master = this.ctx.createGain();
     this.master.gain.value = this.muted()?0:.24;
-    this.master.connect(this.ctx.destination);
+    this.limiter=this.ctx.createDynamicsCompressor();
+    this.limiter.threshold.value=-10;this.limiter.knee.value=12;this.limiter.ratio.value=8;this.limiter.attack.value=.003;this.limiter.release.value=.15;
+    this.master.connect(this.limiter);this.limiter.connect(this.ctx.destination);
+    this.musicGain=this.ctx.createGain();this.musicGain.gain.value=.5;
+    this.musicBoost=this.ctx.createGain();this.musicBoost.gain.value=3;
+    this.musicGain.connect(this.musicBoost);
+    this.radioAnalyser=this.ctx.createAnalyser();this.radioAnalyser.fftSize=256;
+    this.musicBoost.connect(this.radioAnalyser);this.radioAnalyser.connect(this.master);this.radioSamples=new Float32Array(256);
     this.noise = this.makeNoise();
     this.reverb = this.ctx.createConvolver();
     this.reverb.buffer = this.makeImpulse(.62,3.1);
@@ -31,7 +38,7 @@ export class AudioSystem {
   }
   resume() {
     if (!this.ctx) return;
-    if (this.ctx.state === 'suspended') {
+    if (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') {
       const p = this.ctx.resume();
       if (p?.catch) p.catch(() => {});
     }
@@ -50,20 +57,24 @@ export class AudioSystem {
     const t=this.ctx.currentTime+delay, o=this.ctx.createOscillator(), g=this.ctx.createGain();
     o.type=type; o.frequency.setValueAtTime(freq,t); if(endFreq) o.frequency.exponentialRampToValueAtTime(Math.max(20,endFreq),t+duration);
     g.gain.setValueAtTime(volume,t); g.gain.exponentialRampToValueAtTime(.0001,t+duration);
-    o.connect(g); g.connect(this.master); o.start(t); o.stop(t+duration+.02);
+    o.connect(g); g.connect(this.output||this.master); o.start(t); o.stop(t+duration+.02);
   }
   burst(duration=.07, volume=.13, filter=900, highpass=0, delay=0, reverbSend=0) {
     if(!this.ctx || this.muted()) return;
     const t=this.ctx.currentTime+delay,s=this.ctx.createBufferSource(),low=this.ctx.createBiquadFilter(),high=this.ctx.createBiquadFilter(),g=this.ctx.createGain();
     s.buffer=this.noise;low.type='lowpass';low.frequency.value=filter;high.type='highpass';high.frequency.value=highpass;g.gain.setValueAtTime(volume,t);g.gain.exponentialRampToValueAtTime(.0001,t+duration);
-    s.connect(low);low.connect(high);high.connect(g);g.connect(this.master);
-    if(reverbSend&&this.reverb){const send=this.ctx.createGain();send.gain.value=reverbSend;g.connect(send);send.connect(this.reverb);}
+    s.connect(low);low.connect(high);high.connect(g);g.connect(this.output||this.master);
+    if(reverbSend&&this.reverb&&!this.output){const send=this.ctx.createGain();send.gain.value=reverbSend;g.connect(send);send.connect(this.reverb);}
     s.start(t);s.stop(t+duration+.02);
   }
   shoot(kind='rifle') {
     const pitch=.92+Math.random()*.16;
     // Layered report: transient crack → body → room tail (more room in the mix).
-    if(kind==='shotgun'){
+    if(kind==='smg'){
+      this.burst(.008,.16,12500,2800,0,.08);this.burst(.055,.2,2100,220,0,.18);this.tone(170*pitch,.06,'triangle',.14,70);
+    }else if(kind==='lmg'){
+      this.burst(.012,.25,12500,1800,0,.14);this.burst(.13,.34,1200,50,0,.28);this.tone(85*pitch,.16,'sawtooth',.28,32);this.burst(.12,.06,2700,300,.035,.35);
+    }else if(kind==='shotgun'){
       this.burst(.012,.26,15000,3200,0,.12);
       this.burst(.028,.52,9200,380,0,.4);this.burst(.26,.4,980,30,0,.78);this.tone(64*pitch,.28,'sawtooth',.4,24);
       this.burst(.38,.14,2400,120,.06,1);this.tone(310,.06,'square',.07,180,.2);
@@ -280,8 +291,47 @@ export class AudioSystem {
   vehicle() { this.tone(74,.2,'sawtooth',.08,118);this.tone(148,.16,'sine',.04,196,.08); }
   elite() { this.tone(110,.46,'sawtooth',.12,55);this.tone(220,.32,'square',.045,330,.12);this.burst(.2,.07,900,40,.05,.7); }
   roadkill() { this.burst(.12,.2,380,25);this.tone(62,.18,'sawtooth',.16,31);this.tone(520,.08,'square',.06,790,.08); }
+  explosion() { this.burst(.42,.24,720,30);this.burst(.22,.12,3400,500,.04,.4);this.tone(72,.55,'sine',.2,22); }
   engine(speed=0,boost=false) { const pitch=70+Math.abs(speed)*13+(boost?48:0);this.tone(pitch,.12,'sawtooth',boost?.055:.028,pitch*.82);if(boost)this.burst(.08,.035,1250,80); }
   // In-mission combat score: dark cyber pad + restrained pulse (not noisy drums).
+  startRadio(settings){
+    this.stopRadio();this.resume();this.radioStep=0;
+    const tick=()=>{
+      const config=settings();
+      if(!config.playing){this.radioTimer=null;return;}
+      if(this.ctx?.state==='running')this.radioBeat(this.radioStep++,config.station,config.intensity,config.wave,config.volume);
+      this.radioTimer=setTimeout(tick,config.station==='capital'?150:config.station==='dusk'?300:156);
+    };
+    tick();
+  }
+  stopRadio(){if(this.radioTimer!=null)clearTimeout(this.radioTimer);this.radioTimer=null;}
+  radioStatus(){
+    if(!this.radioAnalyser)return {state:this.ctx?.state||'unavailable',steps:this.radioStep||0,rms:0};
+    this.radioAnalyser.getFloatTimeDomainData(this.radioSamples);
+    let power=0;for(const sample of this.radioSamples)power+=sample*sample;
+    return {state:this.ctx.state,steps:this.radioStep||0,rms:Math.sqrt(power/this.radioSamples.length)};
+  }
+  radioBeat(step,station='tactical',intensity=0,wave=1,volume=.5){
+    if(!this.ctx||this.muted()||station==='off')return;
+    this.output=this.musicGain;
+    // Original procedural compositions only. No external streams or downloads.
+    const duck=this.ctx.currentTime<(this._voiceBusyUntil||0)?.25:1;
+    this.musicGain.gain.setTargetAtTime(Math.max(0,Math.min(1,volume))*duck,this.ctx.currentTime,.08);
+    try{
+      if(station==='tactical')this.musicBeat(step,intensity,wave);
+      else if(station==='capital'){
+        const roots=[110,130.81,98,146.83],root=roots[Math.floor(step/16)%4],s=step%16;
+        if(s%4===0)this.tone(70,.2,'sine',.1,30);
+        if([3,6,10,14].includes(s))this.tone(root*(s===10?1.5:1),.3,'triangle',.065,root*.98);
+        if(s===4||s===12)this.burst(.05,.035,1600,650);
+        if(s%2)this.burst(.025,.012,5500,2500);
+        if(s===0){this.tone(root*2,1.5,'sine',.035);this.tone(root*2.5,1.3,'sine',.025);}
+      }else if(station==='dusk'&&step%8===0){
+        const root=[110,146.83,130.81,98][Math.floor(step/16)%4];
+        this.tone(root,1.8,'sine',.055,root*.99);this.tone(root*1.5,1.5,'triangle',.025);this.tone(root*2,1.3,'sine',.02);
+      }
+    }finally{this.output=null;}
+  }
   // ~96 BPM feel on a 16th grid — atmospheric, builds with intensity.
   musicBeat(step,intensity=0,wave=1) {
     if(!this.ctx||this.muted())return;

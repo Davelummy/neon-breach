@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#05070c">
   <meta name="description" content="NEON BREACH — a free browser tactical FPS. Party leaderboard, gamepad support, three operations. Play with family & friends on the same Wi‑Fi.">
   <meta name="mobile-web-app-capable" content="yes">
@@ -40,7 +40,7 @@
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       user-select: none;
       -webkit-user-select: none;
-      touch-action: none;
+      touch-action: auto;
     }
 
     button { font: inherit; }
@@ -121,7 +121,16 @@
       50% { opacity: .35; }
     }
 
-    #hud { position: fixed; inset: 0; z-index: 5; pointer-events: none; text-shadow: 0 1px 8px #000; }
+    #hud { position: fixed; inset: 0; z-index: 13; pointer-events: none; text-shadow: 0 1px 8px #000; }
+    #gameRadio { position:absolute;right:22px;top:178px;display:flex;align-items:center;width:200px;pointer-events:auto;background:rgba(4,12,18,.85);border:1px solid var(--line);border-radius:8px; }
+    #gameRadio button { width:44px;min-height:44px;padding:0;border:0;background:transparent;color:var(--cyan);font-size:26px;touch-action:manipulation; }
+    #gameRadio span { flex:1;min-width:0;text-align:center; }
+    #gameRadio small { display:block;color:var(--muted);font-size:8px;letter-spacing:.05em; }
+    #gameRadio b { display:block;font-size:10px; }
+    #gameRadio button:focus-visible { outline:2px solid var(--cyan);outline-offset:-3px; }
+    #gameRadio #radioPlay { font-size:14px; }
+    #radioCredit { color:var(--cyan); }
+    @media(max-width:760px),(pointer:coarse) { #gameRadio { top:132px;right:max(10px,env(safe-area-inset-right));width:180px; } }
     .hud-panel {
       border: 1px solid var(--line);
       background: linear-gradient(135deg, rgba(4,12,18,.83), rgba(5,9,16,.58));
@@ -139,12 +148,13 @@
     #controllerStatus.connected { color: var(--cyan); border-color: rgba(49,245,219,.45); opacity: 1; box-shadow: 0 0 14px rgba(49,245,219,.1); }
     #objectiveBox { position: absolute; top: 20px; left: 50%; width: min(360px, 42vw); transform: translateX(-50%); padding: 11px 18px 12px; text-align: center; }
     #objectiveLabel { display: flex; justify-content: space-between; margin-bottom: 7px; }
-    #missionLabel { margin-top: 7px; color: var(--ink); font: 800 8px/1 ui-monospace, monospace; letter-spacing: .16em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #missionLabel { margin-top: 7px; color: var(--ink); font: 800 10px/1.4 ui-monospace, monospace; letter-spacing: .08em; white-space: normal; }
     #waveTrack { height: 3px; background: rgba(255,255,255,.1); overflow: hidden; }
     #waveFill { height: 100%; width: 0; background: linear-gradient(90deg, var(--cyan), var(--violet)); box-shadow: 0 0 10px var(--cyan); transition: width .2s; }
     #radarWrap { position: absolute; right: 22px; top: 20px; width: 128px; height: 128px; border-radius: 50%; padding: 5px; }
     #radar { width: 100%; height: 100%; border-radius: 50%; opacity: .92; }
-    #radarWrap::after { content: "PROX RADAR"; position: absolute; right: 8px; bottom: -18px; font-size: 8px; color: var(--muted); letter-spacing: .2em; font-weight: 800; }
+    #radarWrap::after { content: "YOU ▲ · ENEMY ●"; position: absolute; right: 0; bottom: -18px; font-size: 8px; color: var(--muted); letter-spacing: .04em; font-weight: 800; }
+    #radarWrap,#radar{border-radius:4px}
 
     .bottom-left { position: absolute; left: 24px; bottom: 23px; width: min(310px, 34vw); }
     .status-row { display: grid; grid-template-columns: 58px 1fr 38px; align-items: center; gap: 9px; margin-top: 8px; }
@@ -194,9 +204,9 @@
     #hitMarker::after { transform: rotate(180deg); }
     #hitMarker.critical::before, #hitMarker.critical::after { border-color: var(--amber); }
 
-    #announcement { position: absolute; top: 27%; left: 50%; transform: translateX(-50%); text-align: center; opacity: 0; transition: opacity .24s, transform .24s; }
+    #announcement { position: absolute; top: 21%; left: 50%; max-width:70vw; transform: translateX(-50%); text-align: center; opacity: 0; transition: opacity .24s, transform .24s; }
     #announcement.show { opacity: 1; transform: translateX(-50%) translateY(-5px); }
-    #announcement strong { display: block; font-size: clamp(28px, 5vw, 58px); font-style: italic; font-weight: 1000; letter-spacing: .06em; text-transform: uppercase; }
+    #announcement strong { display: block; font-size: clamp(18px, 2.5vw, 28px); font-style: italic; font-weight: 1000; letter-spacing: .06em; text-transform: uppercase; }
     #announcement span { display: inline-block; margin-top: 7px; padding: 5px 10px; color: var(--cyan); font-size: 9px; letter-spacing: .28em; font-weight: 900; text-transform: uppercase; border-left: 2px solid var(--cyan); border-right: 2px solid var(--cyan); background: rgba(0,0,0,.38); }
     #missionComms { position: absolute; left: 24px; top: 92px; width: min(360px,38vw); padding: 10px 12px; opacity: 0; transform: translateX(-14px); transition: opacity .22s, transform .22s; border-left: 2px solid var(--cyan); background: linear-gradient(90deg,rgba(3,11,17,.88),rgba(3,11,17,.42)); }
     #missionComms.show { opacity: 1; transform: translateX(0); }
@@ -281,12 +291,13 @@
     .result-grid span { display: block; margin-top: 5px; color: var(--muted); font-size: 7px; letter-spacing: .18em; font-weight: 800; }
     .secondary { width: 100%; margin-top: 8px; padding: 13px; color: var(--muted); background: transparent; border: 1px solid rgba(255,255,255,.12); font-size: 10px; letter-spacing: .18em; font-weight: 900; cursor: pointer; }
 
-    #touchControls { position: fixed; inset: 0; z-index: 12; pointer-events: none; }
-    #joystickZone { position: absolute; left: 16px; bottom: max(20px, env(safe-area-inset-bottom)); width: 142px; height: 142px; pointer-events: auto; }
+    #game,#threeGame { touch-action:none; }
+    #touchControls { position: fixed; inset: 0; z-index: 12; pointer-events: none;touch-action:none; }
+    #joystickZone { position: absolute; left: max(16px, env(safe-area-inset-left)); bottom: max(20px, env(safe-area-inset-bottom)); width: 142px; height: 142px; pointer-events: auto;touch-action:none; }
     #joystickBase, #joystickKnob { position: absolute; border-radius: 50%; }
     #joystickBase { inset: 12px; border: 1px solid rgba(49,245,219,.26); background: rgba(3,12,17,.27); box-shadow: inset 0 0 24px rgba(49,245,219,.08); }
     #joystickKnob { left: 49px; top: 49px; width: 44px; height: 44px; border: 1px solid rgba(49,245,219,.5); background: rgba(49,245,219,.13); box-shadow: 0 0 22px rgba(49,245,219,.14); }
-    #lookZone { position: absolute; right: 0; top: 15%; width: 58%; height: 70%; pointer-events: auto; }
+    #lookZone { position: absolute; right: 0; top: 15%; width: 58%; height: 70%; pointer-events: auto;touch-action:none; }
     .touch-btn { position: absolute; pointer-events: auto; display: grid; place-items: center; border-radius: 50%; color: var(--ink); border: 1px solid rgba(255,255,255,.26); background: rgba(5,13,19,.36); font-size: 9px; letter-spacing: .08em; font-weight: 900; backdrop-filter: blur(4px); }
     .touch-btn.active { color: #03100f; background: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 22px rgba(49,245,219,.35); }
     #fireButton { right: 28px; bottom: max(27px, env(safe-area-inset-bottom)); width: 78px; height: 78px; border-color: rgba(255,83,109,.62); box-shadow: inset 0 0 28px rgba(255,83,109,.14), 0 0 20px rgba(255,83,109,.08); }
@@ -294,11 +305,17 @@
     #sprintButton { right: 33px; bottom: max(119px, calc(env(safe-area-inset-bottom) + 92px)); width: 50px; height: 50px; }
     #adsButton { right: 102px; bottom: max(108px, calc(env(safe-area-inset-bottom) + 81px)); width: 50px; height: 50px; }
     #jetButton { right: 33px; bottom: max(181px, calc(env(safe-area-inset-bottom) + 154px)); width: 50px; height: 50px; border-color: rgba(255,187,85,.55); }
-    #pauseButton { left: max(14px, env(safe-area-inset-left)); top: max(66px, calc(env(safe-area-inset-top) + 52px)); width: 42px; height: 42px; }
+    #pauseButton { left: max(14px, env(safe-area-inset-left)); top: max(66px, calc(env(safe-area-inset-top) + 52px)); width: 44px; height: 44px; }
+    #screenModeButton { left:max(68px,calc(env(safe-area-inset-left) + 54px));top:max(66px,calc(env(safe-area-inset-top) + 52px));width:48px;height:44px;font-size:7px; }
+    #weaponButton,#meleeButton { left:calc(max(16px,env(safe-area-inset-left)) + 154px);width:44px;height:44px;font-size:7px; }
+    #weaponButton { bottom:max(24px,calc(env(safe-area-inset-bottom) + 4px)); }
+    #meleeButton { bottom:max(78px,calc(env(safe-area-inset-bottom) + 58px)); }
     #lockButton { left: max(14px, env(safe-area-inset-left)); top: max(116px, calc(env(safe-area-inset-top) + 102px)); width: 48px; height: 48px; font-size: 7px; }
-    #rotatePrompt { position: fixed; inset: 0; z-index: 50; display: none; place-items: center; padding: 40px; text-align: center; background: #03070b; }
-    #rotatePrompt b { display: block; margin-bottom: 10px; color: var(--cyan); font-size: 32px; }
-    #rotatePrompt span { color: var(--muted); font-size: 13px; line-height: 1.5; }
+    #rotatePrompt { display:none;padding:12px;text-align:center;background:#07151b;border:1px solid var(--line);border-radius:8px; }
+    #rotatePrompt b { display:block;margin-bottom:6px;color:var(--cyan);font-size:13px; }
+    #rotatePrompt span { display:block;color:var(--muted);font-size:12px;line-height:1.5; }
+    #rotatePrompt>div { display:flex;gap:8px; }
+    #rotatePrompt button { min-height:44px;letter-spacing:.02em; }
 
     @media (max-width: 760px) {
       .menu { grid-template-columns: 1fr; gap: 28px; align-items: start; }
@@ -322,6 +339,8 @@
     }
 
     @media (pointer: coarse) and (orientation: landscape) {
+      #lockButton { left:max(122px,calc(env(safe-area-inset-left) + 108px));top:max(66px,calc(env(safe-area-inset-top) + 52px)); }
+      #gameRadio { top:120px;right:max(126px,calc(env(safe-area-inset-right) + 112px)); }
       .top-left { top: 12px; left: max(16px, env(safe-area-inset-left)); }
       .brand-lockup b { font-size: 12px; }
       #objectiveBox { top: 10px; width: 40vw; padding: 8px 12px 9px; }
@@ -340,8 +359,33 @@
       .result-grid { grid-template-columns: repeat(2,1fr); }
     }
 
-    @media (pointer: coarse) { .desktop-only { display: none; } }
-    @media (orientation: portrait) and (pointer: coarse) { #rotatePrompt { display: grid; } }
+    .mobile-only { display:none; }
+    @media (pointer: coarse) { .desktop-only { display: none; }.mobile-only { display:block; } }
+    @media (orientation: portrait) and (pointer: coarse) {
+      #rotatePrompt { display:block; }
+      #hud .top-left,#controllerStatus { display:none; }
+      #pauseButton { top:max(12px,env(safe-area-inset-top)); }
+      #screenModeButton { top:max(12px,env(safe-area-inset-top)); }
+      #lockButton { top:max(62px,calc(env(safe-area-inset-top) + 50px)); }
+      #radarWrap { width:72px;height:72px;right:10px;top:max(10px,env(safe-area-inset-top)); }
+      #radarWrap::after { display:none; }
+      #objectiveBox { top:max(120px,calc(env(safe-area-inset-top) + 110px));left:10px;width:calc(100% - 20px);transform:none; }
+      #gameRadio { top:max(228px,calc(env(safe-area-inset-top) + 218px)); }
+      .bottom-left { left:12px;bottom:max(178px,calc(env(safe-area-inset-bottom) + 158px));width:160px; }
+      .status-row { grid-template-columns:42px 1fr 26px;gap:5px; }
+      .status-label { font-size:7px; }
+      .bottom-right { right:12px;bottom:max(322px,calc(env(safe-area-inset-bottom) + 302px)); }
+      #hud #vehicleButton { right:12px;bottom:max(254px,calc(env(safe-area-inset-bottom) + 234px));max-width:170px; }
+      #joystickZone { width:126px;height:126px; }
+      #joystickKnob { left:41px;top:41px; }
+      #weaponButton,#meleeButton { left:calc(max(16px,env(safe-area-inset-left)) + 134px); }
+    }
+    @media (pointer:coarse) {
+      #fireButton { right:max(28px,calc(env(safe-area-inset-right) + 14px)); }
+      #reloadButton { right:max(118px,calc(env(safe-area-inset-right) + 104px)); }
+      #sprintButton,#jetButton { right:max(33px,calc(env(safe-area-inset-right) + 19px)); }
+      #adsButton { right:max(102px,calc(env(safe-area-inset-right) + 88px)); }
+    }
 
     /* —— Multi-screen menu flow —— */
     #bootSplash {
@@ -361,7 +405,7 @@
 
     #menuRoot {
       z-index: 20;
-      overflow: hidden;
+      overflow: auto;
       background:
         radial-gradient(ellipse 80% 60% at 50% 20%, rgba(49,245,219,.08), transparent 55%),
         radial-gradient(ellipse 50% 40% at 80% 80%, rgba(166,108,255,.07), transparent 50%),
@@ -369,6 +413,9 @@
         linear-gradient(180deg, #040a10 0%, #071018 50%, #050b10 100%);
     }
     #menuRoot.hidden { display: none !important; }
+    /* The menu has its own clipped motion layer; inherited transformed
+       screen ornaments must not expand the scrollable mobile viewport. */
+    #menuRoot::before,#menuRoot::after { display:none; }
 
     /* Animated menu stage — grid + orbs (CSS only, cheap) */
     #menuMotion {
@@ -466,7 +513,25 @@
     .menu-panel h2 { margin: 0 0 8px; font-size: clamp(28px,6vw,40px); font-style: italic; letter-spacing: -.04em; }
     .menu-panel .sub { margin: 0 0 20px; color: var(--muted); font-size: 12px; line-height: 1.5; }
     .menu-stack { display: grid; gap: 10px; }
+    #missionInstruction { margin-top:7px;font-size:11px;line-height:1.4;color:var(--ink); }
+    #supplyHint { position:absolute;left:50%;top:62%;transform:translateX(-50%);max-width:80vw;padding:8px 12px;background:rgba(4,10,15,.85);color:var(--amber);font-size:12px;text-align:center; }
+    #loadoutWeapon,#radioStation { max-width:100%;padding:10px;background:#0b1920;color:var(--ink);border:1px solid var(--cyan); }
+    #arenaSelect { width:100%;padding:10px;background:#0b1920;color:var(--ink);border:1px solid var(--cyan); }
+    #vehicleButton { position:absolute;right:18px;bottom:215px;pointer-events:auto;width:auto;max-width:220px;padding:12px;background:#15472e;border:1px solid #fff;color:#fff;font-size:12px;z-index:15; }
+    #accountGate { position:fixed;inset:0;z-index:65;display:grid;place-items:center;background:rgba(2,7,12,.97);overflow:auto;padding:20px; }
+    #accountGate .gate-card { width:min(440px,100%);padding:24px;border:1px solid var(--cyan);background:#0c1822; }
+    #accountGate label { display:block;margin:15px 0 6px; }
+    #accountGate input { display:block;width:100%;padding:12px;background:#061019;color:white;border:1px solid #6d8b94; }
+    #accountStatus,#emailStatus { color:var(--amber);min-height:24px; }
+    .account-form { display:flex;gap:8px;flex-wrap:wrap;margin:12px 0; }
+    .account-form input { flex:1;min-width:160px; }
+    .account-form button { width:auto; }
+    @media (pointer:coarse) { #vehicleButton { right:100px;bottom:175px;max-width:180px; } }
     .menu-stack .primary, .menu-stack .secondary { width: 100%; }
+    #mainAccount { display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px; }
+    #mainAccountName { min-width:0;font-size:14px;line-height:1.4;letter-spacing:normal;overflow-wrap:break-word; }
+    #mainAccount #mainLogout { width:auto;min-width:96px;min-height:44px;margin:0;white-space:nowrap;letter-spacing:normal; }
+    @media(max-width:420px){#mainAccount{grid-template-columns:1fr;gap:8px}#mainAccount #mainLogout{justify-self:start}}
     .menu-stack > * {
       animation: btn-in .45s cubic-bezier(.2,.8,.2,1) both;
     }
@@ -639,6 +704,124 @@
     }
     .how-row span { color: var(--muted); font-size: 12px; line-height: 1.4; }
 
+    @media(pointer:coarse) {
+      #controllerStatus,#weaponSlots,#lockModeBadge,#vehicleHud { display:none; }
+      #objectiveBox #missionComms { position:static;display:none;width:100%;padding:0;margin-top:6px;border:0;background:none;transform:none;opacity:1; }
+      #objectiveBox #missionComms.show { display:block; }
+      #objectiveBox #missionComms b { display:none; }
+      #objectiveBox #missionComms span { margin:0;font-size:9px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow:hidden;color:var(--muted); }
+      #announcement { top:114px;left:28%;max-width:40vw; }
+      #announcement strong { font-size:11px;line-height:1.3; }
+      #announcement span { display:none; }
+      #message { bottom:130px;max-width:40vw;font-size:9px;letter-spacing:.03em; }
+    }
+    @media(pointer:coarse) and (orientation:portrait) {
+      #objectiveBox #missionComms span { -webkit-line-clamp:2; }
+      #gameRadio { top:max(260px,calc(env(safe-area-inset-top) + 250px)); }
+      #announcement { top:max(98px,calc(env(safe-area-inset-top) + 88px));left:50%;max-width:70vw; }
+      #message { top:314px;bottom:auto;max-width:90vw; }
+    }
+
+    .rank-filters label { display:flex;flex-direction:column;gap:6px;flex:1;font-size:12px;color:var(--muted); }
+    .rank-filters select { background:#0a141a;color:var(--ink);border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:10px;font:inherit; }
+    /* One primary task per screen; advanced choices remain discoverable. */
+    [hidden] { display:none!important; }
+    details.quiet-options { width:100%;margin:12px 0;border:1px solid var(--line);border-radius:8px;padding:0 12px; }
+    details.quiet-options > summary { cursor:pointer;padding:14px 0;min-height:44px;font-size:14px;color:var(--ink); }
+    details.quiet-options[open] { padding-bottom:12px; }
+    #menuRoot .menu-screen,#menuRoot .menu-panel,#menuRoot .menu-stack > *,#menuRoot .title-hero h1,#menuRoot .title-hero h1 em,#menuRoot .lb-row { animation:none!important; }
+    #menuMotion,#screenMain .eyebrow,#screenMain > p,#controllerStatus,#hud .top-left,#lockModeBadge,#targetReadout,#vehicleHud { display:none!important; }
+    #screenMain .title-hero { margin-bottom:20px; }
+    #screenMain .title-hero p { font-size:14px;letter-spacing:0; }
+    #rotatePrompt { display:none!important; }
+    #gameRadio { width:220px; }
+    #touchExtras { position:absolute;right:12px;top:122px;width:210px;padding:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;pointer-events:auto;background:rgba(4,12,18,.96);border:1px solid var(--line);border-radius:12px;z-index:3; }
+    #touchExtras .touch-btn { position:static;width:54px;height:54px;min-width:44px;font-size:10px; }
+    #touchMoreButton { right:12px;top:68px;width:48px;height:44px;border-radius:10px;font-size:10px; }
+    body.in-vehicle #fireButton,body.in-vehicle #reloadButton,body.in-vehicle #touchExtras button:not(#screenModeButton) { display:none!important; }
+    @media(pointer:coarse),(max-width:760px) {
+      #hud #scoreBox,#hud #missionComms,#hud #announcement,#hud #weaponSlots,#hud #weaponName,#objectiveLabel,#hud #missionLabel,#hud #objectiveDistance,#hud #combo { display:none!important; }
+      #objectiveBox { top:max(12px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left));right:76px;width:auto;max-width:420px;padding:10px 12px;transform:none; }
+      #missionInstruction { font-size:12px;line-height:1.35;margin:0; }
+      #waveTrack { display:none; }
+      #pauseButton { top:max(12px,env(safe-area-inset-top));left:auto;bottom:auto;right:max(12px,env(safe-area-inset-right));width:48px;height:44px; }
+      #hud #radarWrap{display:block!important;top:124px;right:max(12px,env(safe-area-inset-right));width:80px;height:80px;padding:3px;pointer-events:none}
+      #radarWrap::after{display:none}
+      #gameRadio { top:76px;left:12px;right:auto;width:220px; }
+      #hud .bottom-left { bottom:max(174px,calc(env(safe-area-inset-bottom) + 174px));left:max(16px,env(safe-area-inset-left));width:132px; }
+      .status-row { grid-template-columns:34px 1fr;gap:6px;margin:3px 0; }
+      .status-value { display:none; }
+      .status-label { font-size:8px; }
+      .bar { height:5px; }
+      #hud .bottom-right { right:max(18px,env(safe-area-inset-right));bottom:max(184px,calc(env(safe-area-inset-bottom) + 184px)); }
+      #ammo { font-size:26px; }#reserve { font-size:12px; }
+      #fireButton { right:max(18px,env(safe-area-inset-right));bottom:max(24px,env(safe-area-inset-bottom));width:72px;height:72px; }
+      #reloadButton { right:max(104px,calc(env(safe-area-inset-right) + 104px));bottom:max(24px,env(safe-area-inset-bottom));width:48px;height:48px; }
+      #jetButton { right:max(28px,calc(env(safe-area-inset-right) + 28px));bottom:max(110px,calc(env(safe-area-inset-bottom) + 110px));width:52px;height:52px; }
+      #vehicleButton { right:max(12px,env(safe-area-inset-right));top:auto;bottom:max(230px,calc(env(safe-area-inset-bottom) + 230px));max-width:200px; }
+      #message { top:auto;bottom:max(300px,calc(env(safe-area-inset-bottom) + 300px));font-size:10px;max-width:85vw; }
+      .title-hero h1 { font-size:clamp(36px,10vw,58px); }
+      .menu-panel { padding:20px; }
+      #screenMain .secondary { font-size:13px;letter-spacing:0; }
+      #screenHow .how-grid { display:none; }
+    }
+    /* Content-driven safety net for narrow, short, tablet and ultrawide views. */
+    html,body { width:100%;max-width:100%;overscroll-behavior:none; }
+    .menu-panel,.gate-card { min-width:0;max-width:min(100%,720px);overflow-wrap:anywhere; }
+    #menuRoot { height:100dvh; }
+    #accountGate { padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));overflow:auto; }
+    #accountGate .gate-card { width:min(100%,480px);max-height:calc(100dvh - 24px);overflow:auto; }
+    #accountGate input,#menuRoot select,#menuRoot input { max-width:100%;min-width:0; }
+    .nav-row,.rank-filters { flex-wrap:wrap; }
+    #missionPlan li { margin:8px 0;color:var(--muted); }
+    @media(max-width:360px) { .menu-panel { padding:14px; }.time-select,.difficulty { flex-wrap:wrap; }#objectiveBox { left:8px;right:66px;padding:8px; }#missionInstruction { font-size:11px; }#gameRadio { left:8px;max-width:calc(100vw - 80px); }#touchExtras { width:190px;gap:6px; } }
+    @media(pointer:coarse) and (max-height:440px) {
+      #hud .bottom-left { bottom:12px;left:152px;width:104px; }
+      #hud .bottom-right { bottom:16px;right:174px; }
+      #vehicleButton { bottom:92px;right:12px; }
+      #jetButton { bottom:104px;right:20px; }
+      #touchMoreButton { top:66px; }
+      #touchExtras { top:66px;right:74px; }
+      #message { bottom:124px; }
+    }
+    @media(min-width:1800px) { #objectiveBox { max-width:520px; } .menu-panel { font-size:16px; } }
+    @media(max-height:440px) and (pointer:coarse){#hud #radarWrap{left:max(12px,env(safe-area-inset-left));right:auto;top:82px;width:72px;height:72px}body.in-vehicle #hud #radarWrap{left:calc(50% - 36px)}}
+    @media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important;scroll-behavior:auto!important; } }
+  </style>
+  <style>
+    /* Tactical interface: information hierarchy, not simulated extra gameplay. */
+    body[data-hud="tactical"] #scoreBox,
+    body[data-hud="tactical"] #combo,body[data-hud="tactical"] #objectiveLabel,
+    body[data-hud="tactical"] #missionLabel,body[data-hud="tactical"] #objectiveDistance,
+    body[data-hud="tactical"] #weaponSlots { display:none!important; }
+    body[data-hud="tactical"] .hud-panel { clip-path:none;border-radius:4px;backdrop-filter:none;background:rgba(8,15,18,.78);box-shadow:none;border-color:rgba(219,230,214,.25); }
+    #combatStatus { font-size:12px;line-height:1.4;color:#cad5c4;min-height:18px; }
+    #combatStatus.warning { color:#ffb09e;font-weight:700; }
+    #missionInstruction { font-size:13px;line-height:1.45; }
+    #hud .status-label { letter-spacing:.06em; }
+    #hud #weaponName { font-size:12px;letter-spacing:.04em;white-space:normal;max-width:230px; }
+    #touchControls .touch-btn,#joystickZone { opacity:var(--touch-opacity,.85); }
+    #touchControls .touch-btn:active,#touchControls .touch-btn.active,#touchControls .touch-btn:focus-visible { opacity:1; }
+    #adsButton { right:max(104px,calc(env(safe-area-inset-right) + 104px));bottom:max(110px,calc(env(safe-area-inset-bottom) + 110px));width:52px;height:52px; }
+    body.in-vehicle #adsButton { display:block; }
+    .setting-row label { line-height:1.4; }
+    #menuRoot button:focus-visible,#menuRoot select:focus-visible,#menuRoot input:focus-visible { outline:2px solid var(--cyan);outline-offset:3px; }
+    @media(max-width:760px),(pointer:coarse) {
+      #hud #weaponName { display:block!important;font-size:10px;max-width:140px; }
+      #combatStatus { font-size:10px;max-width:145px; }
+      #hud .status-value { display:block;font-size:10px; }
+      #hud .status-row { grid-template-columns:38px 1fr 24px; }
+      #hud .bottom-left { width:145px; }
+      #hud .bottom-right { max-width:145px; }
+    }
+    @media(max-width:360px) { #hud .bottom-left { left:10px;width:130px; } #hud .bottom-right { right:10px;max-width:135px; } }
+    @media(pointer:coarse) and (max-height:440px) { #hud .bottom-left { left:164px;width:100px; }#hud .status-row { grid-template-columns:30px 1fr 20px; }#hud .bottom-right { right:174px;max-width:130px; }#vehicleButton { left:50%;right:auto;bottom:140px;transform:translateX(-50%);max-width:180px; } }
+    @media(max-height:300px) { .screen { padding:12px; }.menu-panel { padding:12px; } }
+    #modalScreen::before,#modalScreen::after { display:none; }
+    #modalScreen { height:100dvh; }
+    .modal { min-width:0;max-height:calc(100dvh - 48px);overflow:auto;overflow-wrap:anywhere; }
+    #pausedMission { text-align:left; }
+    #shopWeapons button { min-height:48px;margin:0;white-space:normal;font-size:11px;letter-spacing:.04em;padding:10px; }
   </style>
 </head>
 <body>
@@ -649,18 +832,20 @@
   <div id="letterboxTop"></div><div id="letterboxBottom"></div>
 
   <div id="hud" class="hidden">
+    <div id="gameRadio" hidden aria-label="Vehicle live radio controls"><button id="radioPrevious" type="button" aria-label="Previous radio station">‹</button><span><small id="gameRadioContext">LIVE VEHICLE RADIO</small><b id="gameRadioStation" aria-live="polite">Tune Nigerian radio</b><small><a id="radioCredit" hidden target="_blank" rel="noopener noreferrer">Station website</a></small></span><button id="radioPlay" type="button" aria-label="Discover Nigerian live radio stations">Tune</button><button id="radioNext" type="button" aria-label="Next radio station">›</button></div>
     <div class="top-left">
       <div class="brand-mark"></div>
-      <div class="brand-lockup"><b>NEON BREACH</b><span>UNIT 07</span></div>
+      <div class="brand-lockup"><b>NEON BREACH</b><span>ABUJA · CENTRAL DISTRICT</span></div>
     </div>
     <div id="controllerStatus">DUALSENSE // SCANNING</div>
     <div id="objectiveBox" class="hud-panel">
       <div id="objectiveLabel" class="micro"><span id="waveLabel">BREACH 01 / 05</span><span id="enemyLabel">HOSTILES 00</span></div>
       <div id="waveTrack"><div id="waveFill"></div></div>
       <div id="missionLabel">OBJECTIVE</div>
+      <div id="missionInstruction">Follow the objective marker.</div>
     </div>
     <div id="scoreBox"><div class="micro">SCORE</div><div id="scoreValue">000000</div><div id="killCount" class="micro">00 ELIMINATIONS</div></div>
-    <div id="radarWrap" class="hud-panel"><canvas id="radar" width="128" height="128"></canvas></div>
+    <div id="radarWrap" class="hud-panel" aria-label="Arena map: green arrow is you; red dots are enemies"><canvas id="radar" width="128" height="128"></canvas></div>
     <div class="bottom-left">
       <div class="status-row"><span class="status-label">VITALS</span><div class="bar"><i id="healthBar"></i></div><span id="healthValue" class="status-value">100</span></div>
       <div class="status-row"><span class="status-label">SHIELD</span><div class="bar"><i id="shieldBar"></i></div><span id="shieldValue" class="status-value">050</span></div>
@@ -672,6 +857,7 @@
       <div id="weaponName">VX-9 PULSE RIFLE</div>
       <div id="ammoLine"><span id="ammo">30</span><span id="reserve">/ 120</span></div>
       <div id="reloadTrack"><div id="reloadFill"></div></div>
+      <div id="combatStatus">Ready</div>
     </div>
     <div id="scopeOverlay"><span id="zoomReadout">2.0X OPTIC</span></div>
     <div id="targetReadout">NO TARGET LOCK</div>
@@ -679,6 +865,8 @@
     <div id="takedownFlash"></div>
     <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i></div>
     <div id="vehicleHud">EXIT VEHICLE · E</div>
+    <button id="vehicleButton" hidden aria-label="Enter or exit the nearby vehicle">Enter vehicle</button>
+    <div id="supplyHint" hidden></div>
     <div id="hitMarker"></div>
     <div id="announcement"><strong>BREACH 01</strong><span>HOSTILE SIGNAL ACQUIRED</span></div>
     <div id="missionComms"><b>COMMAND</b><span>Stand by.</span></div>
@@ -714,17 +902,24 @@
       <div class="title-hero">
         <div class="eyebrow" style="justify-content:center">LUMMY LABS · TACTICAL FPS</div>
         <h1>NEON <em>BREACH</em></h1>
-        <p>Infiltrate. Breach. Extract. Challenge friends on the party board.</p>
+        <p>Infiltrate. Breach. Extract. Compete on the leaderboard.</p>
       </div>
       <div class="menu-panel menu-stack">
-        <button class="primary" data-goto="screenOps">Play</button>
-        <button class="secondary" data-goto="screenRanks">Ranks</button>
+        <div id="rotatePrompt"><b>More room in landscape</b><span id="screenModeStatus" role="status">Rotate your phone sideways, or try landscape fullscreen. You can also play in portrait.</span><div><button id="landscapeButton" class="secondary" type="button">Landscape / fullscreen</button><button id="portraitButton" class="secondary" type="button">Keep portrait</button></div></div>
+        <p id="communityStatus" role="status" style="text-align:center;margin:0;font-size:12px;color:var(--muted)" title="Unique browser profiles; online means seen within 90 seconds. Clearing storage creates a new profile.">Checking player counts…</p>
+        <button class="primary" data-goto="screenOps">Play campaign</button>
+        <button id="continueButton" class="secondary hidden">Continue campaign</button>
+        <button class="secondary" data-goto="screenRanks">Leaderboard</button>
+        <button id="multiplayerButton" class="secondary" type="button">Multiplayer · Create / join room</button>
+        <div id="mainAccount" hidden><span id="mainAccountName"></span><button id="mainLogout" class="secondary" type="button">Log out</button></div>
+        <p id="accountActionStatus" role="status" style="margin:0;font-size:13px;text-align:center"></p>
+        <details class="quiet-options"><summary>More</summary>
         <button class="secondary" data-goto="screenHow">How to play</button>
         <button class="secondary" data-goto="screenRecords">Progress</button>
         <button class="secondary" data-goto="screenSettings">Settings</button>
         <button class="secondary" data-goto="screenControls">Controls</button>
         <button id="inviteButton" class="secondary">Invite friends</button>
-        <button id="continueButton" class="secondary hidden">Continue</button>
+        </details>
       </div>
       <p style="margin:10px 0 0;text-align:center;font-size:11px;letter-spacing:.08em;color:rgba(148,178,205,.55)">VOICE AUDIO BY ELEVENLABS (ELEVENLABS.IO) · 3D BY THREE.JS</p>
     </div>
@@ -733,17 +928,19 @@
       <div class="menu-panel">
         <h2>How to play</h2>
         <p class="sub">30-second briefing. Then deploy on <b style="color:var(--cyan)">Recruit</b> if you’re new.</p>
+        <div class="mobile-only" style="padding:12px;border:1px solid var(--line);font-size:12px;line-height:1.6;margin-bottom:16px"><b>Move, look, fire.</b><br>Left thumb moves; drag the right side to look. FIRE shoots, RLD reloads, JET jumps.<br>MORE opens weapon, aim, sprint, melee and screen controls. Enter appears beside a vehicle. Live radio is vehicle-only; it needs an approved station. Rotating your phone does not restart the mission.</div>
         <div class="how-grid">
           <div class="how-row"><kbd>WASD</kbd><span>Move. <b>Q</b> sprint. Mouse looks (click the view first).</span></div>
-          <div class="how-row"><kbd>LMB / R2</kbd><span>Fire. <b>RMB / L2</b> aim down sights.</span></div>
+          <div class="how-row"><kbd>LMB / R2</kbd><span>Fire. <b>Shift</b> also fires (not sprint). <b>RMB / L2</b> aim down sights.</span></div>
+          <div class="how-row"><kbd>Space / ✕</kbd><span>Jet jump. Follow the objective marker to advance.</span></div>
           <div class="how-row"><kbd>R / □</kbd><span>Reload. Empty mags auto-reload.</span></div>
-          <div class="how-row"><kbd>1–4</kbd><span>Switch weapons when unlocked.</span></div>
+          <div class="how-row"><kbd>1–6</kbd><span>Switch unlocked weapons. Walk over medkits and ammo to collect; gun caches equip the gun shown.</span></div>
           <div class="how-row"><kbd>F / R3</kbd><span>Finisher — close range, high score.</span></div>
           <div class="how-row"><kbd>E / △</kbd><span>Enter / exit vehicles near extract.</span></div>
           <div class="how-row"><kbd>Esc</kbd><span>Pause. Options on DualSense.</span></div>
           <div class="how-row"><kbd>Pad</kbd><span>Menus: stick + Cross confirm, Circle back.</span></div>
         </div>
-        <p class="sub" style="margin:0 0 12px">Goal: clear each phase, hit the objective marker, extract alive. Scores post to the <b>party board</b> for friends on this Wi‑Fi.</p>
+        <p class="sub" style="margin:0 0 12px">Goal: clear each phase, reach the objective marker, extract alive. Progress saves on this device. Scores can appear on the world leaderboard or your party board when the server is available.</p>
         <div class="nav-row">
           <button class="secondary" data-goto="screenMain">Back</button>
           <button class="primary" data-goto="screenOps" style="flex:1.4">Got it — play</button>
@@ -753,27 +950,36 @@
 
     <div id="screenOps" class="menu-screen">
       <div class="menu-panel">
-        <h2>Operations</h2>
-        <p class="sub">Choose a mission.</p>
+        <h2>Campaign missions</h2>
+        <p class="sub">Choose an Abuja-inspired arena and a mission. These are fictional layouts, not real landmark replicas.</p>
+        <label for="arenaSelect" class="selection-label">Mission arena</label>
+        <select id="arenaSelect"></select>
+        <p id="arenaDescription" class="sub" style="margin:8px 0 14px"></p>
         <div class="menu-stack" id="opSelect"></div>
         <p id="operationTagline" class="op-tagline" style="margin:12px 0 0"></p>
         <div class="nav-row">
           <button class="secondary" data-goto="screenMain">Back</button>
-          <button class="primary" data-goto="screenDeploy" style="flex:1.4">Next</button>
+          <button class="primary" data-goto="screenDeploy" style="flex:1.4">Mission briefing</button>
         </div>
       </div>
     </div>
 
     <div id="screenDeploy" class="menu-screen">
       <div class="menu-panel">
-        <h2>Deploy</h2>
+        <h2>Mission briefing</h2>
         <p class="sub" id="deployOpName">Ready for launch.</p>
+        <p id="missionPurpose" class="sub"></p>
+        <details class="quiet-options"><summary>Mission route · what happens next</summary><ol id="missionPlan" style="padding-left:0;list-style:none;line-height:1.6;font-size:13px"></ol></details>
+        <div class="selection-label"><label for="loadoutWeapon">Starting weapon</label></div>
+        <select id="loadoutWeapon" style="width:100%"></select>
+        <p id="loadoutHint" class="sub" style="margin:8px 0 14px">Choose your starting gun. Other unlocked guns remain available with 1–6 or weapon cycling. Daily challenges may fix the weapon.</p>
         <div class="selection-label">Conditions</div>
         <div class="time-select">
           <button class="active" data-time="day">Day</button>
           <button data-time="night">Night</button>
         </div>
         <div class="mission-brief"><div id="missionClock" class="clock">13:40</div><div><b id="missionCondition">HIGH VISIBILITY</b><span id="missionBriefText">Clear sightlines and longer range.</span></div></div>
+        <details class="quiet-options"><summary id="missionOptionsSummary">Operative · Day · Options</summary>
         <div class="selection-label">Difficulty</div>
         <div class="difficulty">
           <button data-difficulty="recruit">Recruit</button>
@@ -785,9 +991,10 @@
           <div class="campaign-row"><div><b id="dailyTitle">Today</b><span id="dailyDesc">—</span></div></div>
           <button id="dailyButton" class="secondary" style="width:100%;margin-top:8px">Daily challenge</button>
         </div>
+        </details>
         <div class="nav-row">
           <button class="secondary" data-goto="screenOps">Back</button>
-          <button id="deployButton" class="primary" style="flex:1.6">Deploy</button>
+          <button id="deployButton" class="primary" style="flex:1.6">Start mission</button>
         </div>
       </div>
     </div>
@@ -796,12 +1003,32 @@
       <div class="menu-panel">
         <h2>Settings</h2>
         <p class="sub">Gameplay and audio.</p>
+        <details id="interfaceSettings" class="quiet-options"><summary>Interface &amp; touch controls</summary>
+          <div class="setting-row"><div><label for="settingHud">Combat display</label><small>Both displays show the arena map: green is you, red marks enemies. Full adds score and extra combat details. This does not change difficulty.</small></div><select id="settingHud"><option value="tactical">Tactical</option><option value="full">Full</option></select></div>
+          <div class="setting-row"><div><label for="settingTouchOpacity">Touch visibility <span id="touchOpacityValue">85%</span></label><small>Keep controls readable without covering the world.</small></div><input id="settingTouchOpacity" type="range" min="60" max="100" step="5" value="85"></div>
+          <p>Aim is always beside Fire on touch screens. Move with your left thumb and look with your right. Landscape gives more room; portrait remains playable.</p>
+        </details>
+        <details class="quiet-options"><summary>Account</summary>
+        <h3 id="accountName">Checking your account…</h3>
+        <p>Username reserved indefinitely. Email is optional; verification adds a permanent ownership lock. Do not lose your password: email-based recovery is not available yet.</p>
+        <button id="accountLogout" class="secondary">Log out</button>
+        <fieldset hidden disabled style="border:0;padding:0;margin:0">
+        <form id="emailForm" class="account-form"><label for="accountEmail">Optional email</label><input id="accountEmail" name="email" type="email" autocomplete="email" maxlength="254" required><button>Send verification</button></form>
+        <form id="verifyEmailForm" class="account-form"><label for="emailToken">Verification code from your email</label><input id="emailToken" name="token" type="text" autocomplete="one-time-code" required><button>Verify ownership</button></form>
+        </fieldset>
+        <p id="emailStatus" role="status">Email verification is coming later. Your username is reserved without email.</p>
+        </details>
+        <details id="audioSettings" class="quiet-options"><summary>Audio</summary>
+        <div class="setting-row"><div><label for="radioStation">Vehicle radio</label><small>Enter a vehicle and tap Tune. Live broadcasts include ads. Radio Browser and broadcasters receive your IP when used. <a href="https://www.radio-browser.info/" target="_blank" rel="noopener noreferrer">Directory</a></small></div><select id="radioStation"><option value="off">Off</option></select></div>
+        <div class="setting-row"><div><label for="radioVolume">Radio volume</label><small>Separate from gunfire and command voice</small></div><input id="radioVolume" type="range" min="0" max="100" value="50"></div>
+        </details>
+        <details class="quiet-options"><summary>Sharing &amp; saved progress</summary>
         <div class="setting-row">
-          <div><label>Callsign</label><small>Name on the party leaderboard</small></div>
-          <input id="settingCallsign" type="text" maxlength="16" placeholder="OPERATIVE" autocomplete="nickname" spellcheck="false">
+          <div><label>Callsign</label><small>Public name on scores and leaderboards</small></div>
+          <input id="settingCallsign" type="text" maxlength="16" placeholder="OPERATIVE" autocomplete="nickname" spellcheck="false" readonly>
         </div>
         <div class="setting-row">
-          <div><label>Transfer code</label><small>Enter on another device to sync progress</small></div>
+          <div><label>Transfer code</label><small>Moves campaign saves between devices. Keep this code private.</small></div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
             <input id="settingSyncCode" type="text" maxlength="24" placeholder="CODE" spellcheck="false" style="width:110px">
             <button type="button" id="copySyncCode" class="secondary" style="width:auto;margin:0;padding:8px 10px">Copy</button>
@@ -809,19 +1036,21 @@
           </div>
         </div>
         <div class="setting-row">
-          <div><label>Party code <span id="partyBadge" class="micro">WORLD</span></label><small>Shared board for your group · blank = world</small></div>
+          <div><label>Party code <span id="partyBadge" class="micro">WORLD</span></label><small>Group leaderboard only, not multiplayer or save sync. Blank = world.</small></div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
             <input id="settingPartyCode" type="text" maxlength="12" placeholder="PARTY" spellcheck="false" style="width:90px">
             <button type="button" id="createPartyCode" class="secondary" style="width:auto;margin:0;padding:8px 10px">Create</button>
             <button type="button" id="leavePartyCode" class="secondary" style="width:auto;margin:0;padding:8px 10px">Leave</button>
           </div>
         </div>
+        </details>
+        <details class="quiet-options"><summary>Controls &amp; graphics</summary>
         <div class="setting-row">
           <div><label>Family mode</label><small>More health · gentler damage · stronger aim assist</small></div>
           <button id="familyModeButton" aria-pressed="false">Off</button>
         </div>
         <div class="setting-row">
-          <div><label>Look sensitivity <span id="sensValue" style="color:var(--cyan)">100%</span></label><small>Mouse &amp; right stick</small></div>
+          <div><label for="settingSens">Look sensitivity <span id="sensValue" style="color:var(--cyan)">100%</span></label><small>Touch, mouse &amp; right stick</small></div>
           <input id="settingSens" type="range" min="40" max="180" value="100" step="5">
         </div>
         <div class="setting-row">
@@ -833,7 +1062,7 @@
           <input id="settingVolume" type="range" min="0" max="100" value="28" step="1">
         </div>
         <div class="setting-row">
-          <div><label>Aim assist</label><small>Auto-lock (L1 / T in-game)</small></div>
+          <div><label>Aim assist</label><small>Helps while aiming · Family mode also assists hip fire (L1 / T)</small></div>
           <button id="autoLockButton" class="active" aria-pressed="true">On</button>
         </div>
         <div class="setting-row">
@@ -847,6 +1076,7 @@
             <option value="low">Low</option>
           </select>
         </div>
+        </details>
         <div class="nav-row">
           <button class="secondary" data-goto="screenMain">Back</button>
         </div>
@@ -866,21 +1096,25 @@
         <div id="medalRows" class="scroll-panel"></div>
         <div class="nav-row">
           <button class="secondary" data-goto="screenMain">Back</button>
-          <button class="primary" data-goto="screenRanks" style="flex:1.3">Open ranks</button>
+          <button class="primary" data-goto="screenRanks" style="flex:1.3">View leaderboard</button>
         </div>
       </div>
     </div>
 
     <div id="screenRanks" class="menu-screen">
       <div class="menu-panel">
-        <h2>Party ranks</h2>
-        <p class="sub">World board on Netlify · party codes for private groups · callsign in Settings.</p>
+        <h2>Leaderboard</h2>
+        <p class="sub">World and party boards · client-reported scores · updates every 30 seconds.</p>
         <div class="campaign-head"><div class="micro">Leaderboard</div><span id="leaderboardStatus">…</span></div>
         <div id="rankOpFilter" class="difficulty" style="margin:10px 0 4px"></div>
+        <div class="rank-filters" style="display:flex;gap:12px;flex-wrap:wrap;margin:12px 0">
+          <label>Period <select id="rankPeriod"><option value="all">All time</option><option value="daily">Today (UTC)</option><option value="weekly">Last 7 days (UTC)</option></select></label>
+          <label>Difficulty <select id="rankDifficulty"><option value="all">All difficulties</option><option value="recruit">Recruit</option><option value="operative">Operative</option><option value="nightmare">Nightmare</option></select></label>
+        </div>
         <div id="leaderboardRows" class="scroll-panel" style="max-height:min(52vh,420px)"></div>
         <div class="share-row">
           <button id="refreshRanksButton" class="secondary">Refresh</button>
-          <button id="shareInviteButton" class="primary">Share link</button>
+          <button id="shareInviteButton" class="primary">Invite friends</button>
         </div>
         <div class="nav-row">
           <button class="secondary" data-goto="screenMain">Back</button>
@@ -895,7 +1129,7 @@
         <div class="controls-grid" style="display:grid;margin-top:0">
           <div class="control"><span>Move</span><kbd>WASD</kbd></div>
           <div class="control"><span>Look</span><kbd>Mouse</kbd></div>
-          <div class="control"><span>Fire</span><kbd>LMB</kbd></div>
+          <div class="control"><span>Fire</span><kbd>LMB / Shift</kbd></div>
           <div class="control"><span>Aim</span><kbd>RMB</kbd></div>
           <div class="control"><span>Reload</span><kbd>R</kbd></div>
           <div class="control"><span>Sprint</span><kbd>Q</kbd></div>
@@ -904,7 +1138,7 @@
           <div class="control"><span>Finisher</span><kbd>F</kbd></div>
           <div class="control"><span>Aim assist</span><kbd>T</kbd></div>
           <div class="control"><span>Pause</span><kbd>Esc</kbd></div>
-          <div class="control"><span>Weapons</span><kbd>1-4</kbd></div>
+          <div class="control"><span>Weapons</span><kbd>1-6</kbd></div>
         </div>
         <p class="controller-help" style="margin-top:14px">Menu: stick / D-pad move · Cross / A confirm · Circle / B back · Options pause in-game<br>Combat: left stick move · right stick look · R2 fire · L2 aim · Options pause</p>
         <div class="nav-row">
@@ -921,6 +1155,9 @@
       <div id="modalEyebrow" class="eyebrow" style="justify-content:center">PAUSED</div>
       <h2 id="modalTitle">PAUSED</h2>
       <p id="modalText">Take a breath. Resume when ready.</p>
+      <details id="pausedMission" class="quiet-options" hidden><summary>Current objective &amp; tactical plan</summary><p id="pausedObjective"></p><p id="pausedTactic"></p></details>
+      <details class="quiet-options" id="campaignViewOptions"><summary>Lighting &amp; camera</summary><label for="campaignTime">Time of day</label><select id="campaignTime"><option value="day">Day</option><option value="night">Night</option></select><button id="pausedNvg" class="secondary">Toggle night vision · B / Share</button><button id="pausedView" class="secondary">Switch view · V / Touchpad</button><p>Night vision is separate from night lighting. Civilians are not combat targets. Find the District Armory near the cyan square on your map.</p></details>
+      <section id="gunShopPanel" hidden aria-label="Gun store"><p id="shopBalance"></p><div id="shopWeapons" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px"></div><p id="shopStatus" role="status"></p></section>
       <div id="resultRank"></div>
       <div id="resultGrid" class="result-grid hidden">
         <div><b id="resultScore">0</b><span>SCORE</span></div>
@@ -930,8 +1167,10 @@
         <div><b id="resultGrade">—</b><span>GRADE</span></div>
         <div style="grid-column:1/-1"><b id="resultMedals" style="font-size:11px;letter-spacing:.12em">NO MEDALS</b><span>MEDALS</span></div>
       </div>
+      <p id="resultPublishStatus" class="sub hidden" role="status"></p>
       <button id="resumeButton" class="primary">Resume</button>
       <button id="shareScoreButton" class="secondary hidden">Share score</button>
+      <button id="downloadScoreButton" class="secondary hidden">Download scoreboard</button>
       <button id="quitButton" class="secondary">Main menu</button>
     </div>
   </section>
@@ -940,19 +1179,34 @@
     <div class="gate-card">
       <div class="eyebrow" style="justify-content:center;margin-bottom:12px">LUMMY LABS</div>
       <h2>NEON <em style="color:transparent;-webkit-text-stroke:1px var(--cyan)">BREACH</em></h2>
-      <p>Browser tactical FPS · party ranks · DualSense ready.<br>Click anywhere to unlock audio &amp; enter command.</p>
+      <p>Browser tactical FPS · leaderboards · DualSense ready.<br>Click to open the main menu and enable audio.</p>
       <span class="pulse">CLICK / TAP TO START</span>
     </div>
   </div>
 
+  <div id="accountGate" class="hidden" role="dialog" aria-modal="true" aria-labelledby="accountTitle">
+    <div class="gate-card">
+      <h2 id="accountTitle">Create your operative</h2>
+      <p>One unique username. No email required. This browser stays signed in for 30 days; use your username and password on another device.</p>
+      <p id="accountTransport" role="note"></p>
+      <form id="accountForm">
+        <label for="accountUsername">Unique username</label><input id="accountUsername" name="username" autocomplete="username" pattern="[A-Za-z0-9_]{3,16}" minlength="3" maxlength="16" required>
+        <label for="accountPassword">Password</label><input id="accountPassword" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
+        <p>At least 8 characters. Longer passphrases are welcome. Save it in your password manager. Your username stays reserved indefinitely.</p>
+        <button id="accountSubmit">Create account</button>
+      </form>
+      <button id="accountSwitch" class="secondary">Already registered? Sign in</button>
+      <p id="accountStatus" role="status" aria-live="polite"></p>
+    </div>
+  </div>
   <div id="welcomeGate" class="hidden" role="dialog" aria-modal="true" aria-label="Welcome">
     <div class="gate-card">
       <div class="eyebrow" style="justify-content:center;margin-bottom:12px">WELCOME, OPERATIVE</div>
       <h2>Join the breach</h2>
       <p>30 seconds and you’re in. Pick a callsign and a comfort level — you can change this later in Settings.</p>
       <div class="field">
-        <label for="welcomeCallsign">CALLSIGN</label>
-        <input id="welcomeCallsign" type="text" maxlength="16" placeholder="YOUR NAME" autocomplete="nickname" spellcheck="false">
+        <label for="welcomeCallsign">YOUR USERNAME</label>
+        <input id="welcomeCallsign" type="text" maxlength="16" placeholder="YOUR USERNAME" autocomplete="nickname" spellcheck="false" readonly>
       </div>
       <div class="field">
         <label>COMFORT</label>
@@ -961,19 +1215,10 @@
           <button type="button" id="welcomeStandard" class="secondary">Standard</button>
         </div>
       </div>
-      <button id="welcomeGo" class="primary">Enter command</button>
-      <p style="margin:14px 0 0;font-size:11px;color:var(--muted)">Tip: Host with <code style="color:var(--cyan)">npm run dev</code> and share the Network URL for party ranks.</p>
+      <button id="welcomeGo" class="primary">Continue to main menu</button>
+      <p style="margin:14px 0 0;font-size:11px;color:var(--muted)">WASD move · mouse look · left click fire · Q sprint. Shift also fires. Choose a mission, follow its objective marker, and extract alive.</p>
     </div>
   </div>
-
-  <section id="webglErrorScreen" class="screen hidden" role="alert" aria-live="assertive">
-    <div class="modal">
-      <div class="eyebrow" style="justify-content:center">RENDERER FAULT</div>
-      <h2>WEBGL2 UNAVAILABLE</h2>
-      <p id="webglErrorText">The 3D renderer could not start. Update your browser or enable hardware acceleration to continue.</p>
-      <button class="secondary" onclick="location.reload()">Retry renderer</button>
-    </div>
-  </section>
 
   <section id="webglErrorScreen" class="screen hidden" role="alert" aria-live="assertive">
     <div class="modal">
@@ -989,14 +1234,36 @@
     <div id="lookZone"></div>
     <button id="fireButton" class="touch-btn" aria-label="Fire weapon">FIRE</button>
     <button id="reloadButton" class="touch-btn" aria-label="Reload weapon">RLD</button>
-    <button id="sprintButton" class="touch-btn" aria-label="Hold to sprint">RUN</button>
-    <button id="adsButton" class="touch-btn" aria-label="Toggle aim down sights" aria-pressed="false">ADS</button>
+    <button id="adsButton" class="touch-btn" aria-label="Toggle aim down sights" aria-pressed="false">AIM</button>
     <button id="jetButton" class="touch-btn" aria-label="Hold to jump and fly">JET</button>
     <button id="pauseButton" class="touch-btn" aria-label="Pause game">Ⅱ</button>
+    <button id="touchMoreButton" class="touch-btn" aria-label="More gameplay actions" aria-controls="touchExtras" aria-expanded="false">MORE</button>
+    <div id="touchExtras" hidden>
+    <button id="viewButton" class="touch-btn" aria-label="Switch first and third person view">VIEW 1P</button>
+    <button id="nightVisionButton" class="touch-btn" aria-label="Toggle night vision" aria-pressed="false">NVG OFF</button>
+    <button id="weaponButton" class="touch-btn" aria-label="Switch to next unlocked weapon">GUN</button>
+    <button id="meleeButton" class="touch-btn" aria-label="Melee takedown">MELEE</button>
+    <button id="sprintButton" class="touch-btn" aria-label="Hold to sprint">RUN</button>
+    <button id="screenModeButton" class="touch-btn" aria-label="Try landscape fullscreen">SCREEN</button>
     <button id="lockButton" class="touch-btn active" aria-label="Toggle auto lock" aria-pressed="true">LOCK<br>ON</button>
+    </div>
   </div>
-  <div id="rotatePrompt"><div><b>↻</b><span>Rotate your device to landscape<br>for the full combat interface.</span></div></div>
 
+  <dialog id="multiplayerPanel" aria-label="Multiplayer" style="position:fixed;inset:0;width:100%;height:100%;max-width:none;max-height:none;padding:0;border:0;background:#081519;color:white">
+    <iframe id="multiplayerFrame" title="NEON BREACH multiplayer" allow="fullscreen; gamepad" style="display:block;width:100%;height:100%;border:0"></iframe>
+  </dialog>
+  <script type="module">
+    import {accountUser,showAccountGate} from '/accounts.js';
+    const panel=document.getElementById('multiplayerPanel'),frame=document.getElementById('multiplayerFrame'),button=document.getElementById('multiplayerButton');
+    function closeMultiplayer(){frame.src='about:blank';panel.close();document.body.classList.remove('multiplayer-active');button.focus();const url=new URL(location.href);url.searchParams.delete('mode');url.searchParams.delete('room');history.replaceState(null,'',url);}
+    function openMultiplayer(){if(panel.open)return;document.exitPointerLock?.();document.body.classList.add('multiplayer-active');panel.showModal();const url=new URL('/multiplayer.html',location.href);url.searchParams.set('embedded','1');const query=new URLSearchParams(location.search);if(query.has('qa'))url.searchParams.set('qa','1');if(query.has('room'))url.searchParams.set('room',query.get('room'));frame.src=url.href;frame.focus();}
+    button.addEventListener('click',()=>accountUser()?openMultiplayer():showAccountGate());
+    panel.addEventListener('cancel',event=>{event.preventDefault();/* Escape releases the mouse, not a live room. Use Leave room. */});
+    addEventListener('message',event=>{if(event.origin!==location.origin||event.source!==frame.contentWindow)return;if(event.data?.type==='neon-multiplayer-leave')closeMultiplayer();if(event.data?.type==='neon-multiplayer-logout'){closeMultiplayer();document.getElementById('mainLogout').click();}});
+    // Returning sessions and newly authenticated invites share one account gate.
+    function followInvite(){if(accountUser()&&new URLSearchParams(location.search).get('mode')==='multiplayer')openMultiplayer();}
+    addEventListener('neon-account-changed',followInvite);followInvite();
+  </script>
   <script type="module" src="/game.js"></script>
 </body>
 </html>

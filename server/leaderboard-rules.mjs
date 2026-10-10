@@ -29,6 +29,10 @@ export function sanitizePartyCode(value) {
  * impossible; clamps cosmetic fields when ok.
  */
 export function validateScoreEntry(payload = {}) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return { ok: false, error: 'Invalid score payload.' };
+  for (const field of ['score', 'kills', 'elapsed_seconds']) {
+    if (!Number.isFinite(Number(payload[field])) || Number(payload[field]) < 0) return { ok: false, error: `Invalid ${field}.` };
+  }
   const elapsed = Math.max(0, Math.min(86400, Math.floor(Number(payload.elapsed_seconds) || 0)));
   const kills = Math.max(0, Math.floor(Number(payload.kills) || 0));
   const score = Math.max(0, Math.floor(Number(payload.score) || 0));
@@ -73,6 +77,7 @@ export function upsertEntry(board, entry) {
   const idx = list.findIndex(
     row =>
       sanitizeCallsign(row.callsign) === callsign &&
+      (row.difficulty || 'operative') === (entry.difficulty || 'operative') &&
       Math.max(0, Math.floor(Number(row.operation) || 0)) === operation
   );
 
@@ -114,6 +119,15 @@ export function rankBoard(board, options = {}) {
       : Math.max(0, Math.min(9, Math.floor(Number(options.operation))));
 
   let list = Array.isArray(board) ? board.slice() : [];
+  if (['recruit', 'operative', 'nightmare'].includes(options.difficulty)) {
+    list = list.filter(row => (row.difficulty || 'operative') === options.difficulty);
+  }
+  const now = options.now ?? Date.now();
+  if (options.period === 'daily' || options.period === 'weekly') {
+    const start = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate());
+    const since = options.period === 'daily' ? start : start - 6 * 86400000;
+    list = list.filter(row => Number(row.at) >= since && Number(row.at) <= now);
+  }
   if (opFilter !== null && Number.isFinite(opFilter)) {
     list = list.filter(row => Math.max(0, Math.floor(Number(row.operation) || 0)) === opFilter);
   }
@@ -151,3 +165,13 @@ export function rankBoard(board, options = {}) {
 
 export const LEADERBOARD_BOARD_CAP = BOARD_CAP;
 export const LEADERBOARD_RANK_TOP = RANK_TOP;
+
+// UTC daily partitions retain lower recent runs even when an old personal best
+// remains on the all-time board. Weekly means today plus the preceding six days.
+export function periodBoardKeys(base, period = 'all', now = Date.now()) {
+  if (!['daily', 'weekly'].includes(period)) return [base];
+  const date = new Date(now);
+  const today = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  return Array.from({ length: period === 'weekly' ? 7 : 1 }, (_, i) =>
+    `${base}:day:${new Date(today - i * 86400000).toISOString().slice(0, 10)}`);
+}

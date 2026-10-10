@@ -1,13 +1,17 @@
-import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join } from 'node:path';
 import { networkInterfaces } from 'node:os';
 import { resolveStaticPath } from './static-path.mjs';
+import { createCommunityService } from '../server/community-service.mjs';
+import { createAccountService } from '../server/account-service.mjs';
+import { attachMultiplayer } from '../server/multiplayer-service.mjs';
 import {
   sanitizePartyCode,
   validateScoreEntry,
   upsertEntry,
-  rankBoard
+  rankBoard,
+  periodBoardKeys
 } from '../server/leaderboard-rules.mjs';
 
 // Prefer public/ for local play so source edits apply immediately.
@@ -31,7 +35,8 @@ const types = {
   '.js': 'text/javascript; charset=utf-8',
   '.svg': 'image/svg+xml; charset=utf-8',
   '.webp': 'image/webp',
-  '.json': 'application/json; charset=utf-8'
+  '.json': 'application/json; charset=utf-8',
+  '.mp3': 'audio/mpeg'
 };
 
 function json(response, status, body, extra = {}) {
@@ -69,8 +74,7 @@ function ensureDataDir() {
 }
 
 function boardFile(party) {
-  const code = sanitizePartyCode(party);
-  return join(dataDir, code ? `leaderboard-party-${code}.json` : 'leaderboard.json');
+  return join(dataDir, party ? `leaderboard-party-${encodeURIComponent(party)}.json` : 'leaderboard.json');
 }
 
 function loadBoard(party) {
@@ -105,9 +109,11 @@ async function handleLeaderboard(request, response, url) {
     const opRaw = url.searchParams.get('operation');
     const operation =
       opRaw === null || opRaw === '' || opRaw === 'all' ? null : Math.floor(Number(opRaw));
-    const board = loadBoard(party);
+    const period = url.searchParams.get('period') || 'all';
+    const difficulty = url.searchParams.get('difficulty');
+    const board = periodBoardKeys(party, period).flatMap(loadBoard);
     const entries = rankBoard(board, {
-      operation: Number.isFinite(operation) ? operation : null
+      operation: Number.isFinite(operation) ? operation : null, period, difficulty
     });
     return json(response, 200, {
       available: true,
@@ -125,11 +131,16 @@ async function handleLeaderboard(request, response, url) {
     } catch {
       return json(response, 400, { error: 'Invalid JSON body.' });
     }
+    const identity=await accounts.scoreIdentity(new Request(new URL(request.url,`http://${request.headers.host}`),{headers:request.headers}),body.callsign);
+    if(!identity.allowed)return json(response,403,{error:'Sign in to use this reserved username.'});
+    body.callsign=identity.callsign;
     const validated = validateScoreEntry(body);
     if (!validated.ok) return json(response, 400, { error: validated.error });
-    const entry = validated.entry;
+    const entry = { ...validated.entry, at: Date.now() };
     const board = upsertEntry(loadBoard(entry.party), entry);
     saveBoard(entry.party, board);
+    const dailyKey = periodBoardKeys(entry.party, 'daily', entry.at)[0];
+    saveBoard(dailyKey, upsertEntry(loadBoard(dailyKey), entry));
     // Rank on the unfiltered board the client renders (matches Netlify function).
     const ranked = rankBoard(board, { operation: null });
     const mine = ranked.find(
@@ -147,6 +158,35 @@ async function handleLeaderboard(request, response, url) {
 
   return json(response, 405, { error: 'Method not allowed.' });
 }
+
+// Local adapter for public results and browser-profile presence.
+const communityDir = join(dataDir, 'community');
+const localCommunityStore = {
+  async delete(key) {
+    const { unlinkSync } = await import('node:fs');
+    try { unlinkSync(join(communityDir, encodeURIComponent(key))); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  },
+  async get(key) {
+    try { return JSON.parse(readFileSync(join(communityDir, encodeURIComponent(key)), 'utf8')); }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  },
+  async setJSON(key, value, options = {}) {
+    mkdirSync(communityDir, { recursive: true,mode:0o700 });
+    chmodSync(communityDir,0o700);
+    try {
+      writeFileSync(join(communityDir, encodeURIComponent(key)), JSON.stringify(value), { flag: options.onlyIfNew ? 'wx' : 'w',mode:0o600 });
+      return { modified: true };
+    } catch (error) { if (error.code === 'EEXIST') return { modified: false }; throw error; }
+  },
+  async *list({ prefix }) {
+    const { readdirSync } = await import('node:fs');
+    const files = existsSync(communityDir) ? readdirSync(communityDir) : [];
+    yield { blobs: files.map(decodeURIComponent).filter(key => key.startsWith(prefix)).map(key => ({ key })) };
+  }
+};
+const accounts=createAccountService(localCommunityStore);
+const handleCommunity = createCommunityService(localCommunityStore,Date.now,{scoreIdentity:accounts.scoreIdentity});
 
 // In dev (serving from public/) the vendored three.js only exists in
 // node_modules; the production build copies it into dist/vendor/.
@@ -166,13 +206,27 @@ function lanAddresses() {
   return out;
 }
 
-createServer(async (request, response) => {
+const server=createServer(async (request, response) => {
   try {
     const pathname = new URL(request.url, 'http://localhost').pathname;
     if (pathname === '/health') return json(response, 200, { status: 'ok', game: 'NEON BREACH' });
+    if(pathname==='/api/multiplayer')return json(response,200,multiplayer);
 
     if (pathname.startsWith('/api/')) {
       const url = new URL(request.url, 'http://localhost');
+      if(pathname.startsWith('/api/auth/')){
+        const accountUrl=new URL(request.url,process.env.NEON_PUBLIC_ORIGIN||`http://${request.headers.host}`);
+        const body=request.method==='POST'?await readBody(request):undefined;
+        const result=await accounts.handle(new Request(accountUrl,{method:request.method,headers:request.headers,...(body!==undefined?{body}:{})}),request.socket.remoteAddress||'local');
+        response.writeHead(result.status,Object.fromEntries(result.headers));return response.end(await result.text());
+      }
+      if (pathname === '/api/community' || pathname === '/api/results') {
+        let body;
+        if (request.method === 'POST') body = await readBody(request);
+        const result = await handleCommunity(new Request(url, { method: request.method, headers: request.headers, ...(body !== undefined ? { body } : {}) }));
+        response.writeHead(result.status, Object.fromEntries(result.headers));
+        return response.end(await result.text());
+      }
       if (pathname === '/api/campaigns') {
         return json(response, 200, {
           available: false,
@@ -197,7 +251,9 @@ createServer(async (request, response) => {
   } catch (error) {
     json(response, 500, { error: error instanceof Error ? error.message : 'Server error' });
   }
-}).listen(port, host, () => {
+});
+const multiplayer=attachMultiplayer(server,accounts,{publicOrigin:process.env.NEON_PUBLIC_ORIGIN});
+server.listen(port, host, () => {
   const from = root.endsWith('dist') ? 'dist (production build)' : 'public (live source)';
   console.log(`NEON BREACH ready  [serving ${from}]`);
   console.log(`  Local:   http://127.0.0.1:${port}`);

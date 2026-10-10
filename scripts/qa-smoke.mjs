@@ -13,8 +13,9 @@ const PORT = 4321;
 const shellRoot = join(homedir(), '.cache', 'puppeteer', 'chrome-headless-shell');
 const { globSync } = await import('node:fs');
 const candidates = globSync(join(shellRoot, '*', '*', 'chrome-headless-shell'));
-const executablePath = candidates.find(existsSync);
-if (!executablePath) { console.error('SKIP: chrome-headless-shell not found'); process.exit(0); }
+const installedChrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const executablePath = process.env.CHROME_PATH || (existsSync(installedChrome) ? installedChrome : candidates.find(existsSync));
+if (!executablePath || !existsSync(executablePath)) { console.error('FAIL: Chrome executable not found; set CHROME_PATH'); process.exit(1); }
 
 const server = spawn(process.execPath, ['scripts/serve.mjs'], { env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });
 const failures = [];
@@ -22,7 +23,7 @@ const check = (label, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
   if (!ok) failures.push(label);
 };
-async function waitForState(page, predicate, timeout = 8000) {
+async function waitForState(page, predicate, timeout = 30000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     if (await page.evaluate(predicate)) return;
@@ -34,21 +35,175 @@ async function waitForState(page, predicate, timeout = 8000) {
 let browser;
 try {
   await new Promise(resolve => setTimeout(resolve, 700));
-  browser = await puppeteer.launch({ executablePath, args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio'] });
+  browser = await puppeteer.launch({ executablePath, timeout: 60000, args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio'] });
   const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  await page.bringToFront();
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(String(error?.message || error)));
 
-  await page.goto(`http://127.0.0.1:${PORT}/?qa`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.goto(`http://127.0.0.1:${PORT}/?qa&quality=low`, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await waitForState(page, () => Boolean(window.__NEON_QA__ && window.__NEON_3D__), 10000);
   check('QA bridge available', true);
+  await waitForState(page,()=>!document.getElementById('accountGate').classList.contains('hidden'));
+  check('signup gate is visible before gameplay',true);
+  if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-signup.png')});
+  await page.type('#accountUsername',`qa_${Date.now()}`);
+  await page.type('#accountPassword','QA-test8');
+  await page.click('#accountSubmit');
+  try{await waitForState(page,()=>document.getElementById('accountGate').classList.contains('hidden'),30000);}catch{throw new Error(`Signup did not finish: ${await page.$eval('#accountStatus',e=>e.textContent)}`);}
+  check('username-only signup starts a persistent session',await page.evaluate(()=>document.getElementById('accountName').textContent.includes('USERNAME RESERVED')));
+  await waitForState(page,()=>Boolean(window.__NEON_CITY__),15000);
+  check('Abuja landmark arenas initialize',await page.evaluate(()=>window.__NEON_CITY__?.stage==='landmark arena blockouts'));
+  await page.select('#radioStation','off');
+  check('live-radio preference is separate from old synthesized stations',await page.evaluate(()=>localStorage.getItem('neon-breach-live-radio')==='off'));
+  check('home secondary choices begin collapsed',await page.$eval('#screenMain details',e=>!e.open));
+  await page.locator('#screenMain details > summary').click();
+  await page.waitForFunction(()=>document.querySelector('#screenMain details').open);
+  await page.$eval('#screenMain [data-goto="screenSettings"]',el=>el.scrollIntoView({block:'center',behavior:'instant'}));
+  await page.locator('#screenMain [data-goto="screenSettings"]').click();
+  await page.waitForSelector('#screenSettings.active');
+  await page.locator('#audioSettings > summary').click();
+  check('grouped audio settings are discoverable through ordinary clicks',await page.$eval('#settingVolume',e=>e.getBoundingClientRect().width>0));
+  await page.click('#interfaceSettings > summary');
+  await page.select('#settingHud','full');
+  check('full HUD can be selected without changing gameplay',await page.evaluate(()=>document.body.dataset.hud==='full'));
+  await page.select('#settingHud','tactical');
+  check('tactical HUD preference is saved',await page.evaluate(()=>document.body.dataset.hud==='tactical'&&JSON.parse(localStorage.getItem('neon-breach-interface')).hud==='tactical'));
+  await page.click('#screenSettings [data-goto="screenMain"]');
+  check('returning home restores the quiet primary menu',await page.$eval('#screenMain details',e=>!e.open));
 
+  // Optional fast pass for portrait/landscape interactions; default remains the full suite.
+  if(process.env.QA_MOBILE_ONLY!=='1'){
   const menuSnapshot = await page.evaluate(() => window.__NEON_QA__.snapshot());
   check('boots into menu', menuSnapshot.mode === 'menu', `mode=${menuSnapshot.mode}`);
+  const conceptualModel = await page.evaluate(() => ({
+    leaderboard: document.querySelector('#screenMain [data-goto="screenRanks"]').textContent === 'Leaderboard',
+    briefing: document.querySelector('#screenOps [data-goto="screenDeploy"]').textContent === 'Mission briefing',
+    invite: document.getElementById('shareInviteButton').textContent === 'Invite friends',
+    controlException: document.getElementById('screenHow').textContent.includes('Shift') && document.getElementById('screenHow').textContent.includes('not sprint'),
+    codeScope: document.getElementById('screenSettings').textContent.includes('not multiplayer or save sync') && document.getElementById('screenSettings').textContent.includes('Keep this code private.'),
+  }));
+  check('familiar navigation labels and explicit control/code scope', Object.values(conceptualModel).every(Boolean));
 
+  try { await waitForState(page, () => /registered players/.test(document.getElementById('communityStatus')?.textContent), 15000); }
+  catch (error) { throw new Error(`${error.message}: ${await page.evaluate(() => `${document.visibilityState} / ${document.getElementById('communityStatus')?.textContent}`)} / ${pageErrors.join(' | ')}`); }
+  check('menu shows registered-account and online counts', true);
+  if (process.env.SMOKE_SHOT) await page.screenshot({ path: process.env.SMOKE_SHOT.replace(/\.png$/, '-menu.png') });
+  const runId = '00000000-0000-4000-8000-000000000099';
+  const communityChecks = await page.evaluate(async id => {
+    const post = await fetch('/api/results', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ run_id: id, callsign: 'QA PILOT', score: 1000, kills: 3, elapsed_seconds: 60, difficulty: 'nightmare', party: 'PRIVATE' }) });
+    const read = await fetch(`/api/results?id=${id}`);
+    const data = await read.json();
+    const missing = await fetch('/api/not-a-real-route');
+    const board = await fetch('/api/leaderboard?period=daily&difficulty=nightmare');
+    return { saved: [201,409].includes(post.status), public: read.ok && data.result?.score === 1000 && !('party' in data.result), unknownJson: missing.status === 404 && missing.headers.get('content-type').includes('application/json'), boardJson: board.ok && board.headers.get('content-type').includes('application/json') };
+  }, runId);
+  check('public results persist without private party data', communityChecks.saved && communityChecks.public);
+  check('unknown APIs return JSON 404', communityChecks.unknownJson);
+  check('period and difficulty board API returns JSON', communityChecks.boardJson);
+  await page.evaluate(() => document.querySelector('[data-goto="screenRanks"]').click());
+  await page.select('#rankPeriod', 'daily');
+  await page.select('#rankDifficulty', 'nightmare');
+  await waitForState(page, () => document.getElementById('leaderboardStatus').textContent !== 'LOADING…');
+  check('leaderboard filters remain functional', await page.$eval('#rankPeriod', element => element.value === 'daily'));
+  if (process.env.SMOKE_SHOT) await page.screenshot({ path: process.env.SMOKE_SHOT.replace(/\.png$/, '-ranks.png') });
+  await page.evaluate(() => document.querySelector('#screenRanks [data-goto="screenMain"]').click());
+
+  // Reuse one tab so background 3D contexts cannot compete with gameplay QA.
+  const resultPage = page;
+  await resultPage.goto(`http://127.0.0.1:${PORT}/results.html?id=${runId}`, { waitUntil: 'domcontentloaded' });
+  await waitForState(resultPage, () => !document.getElementById('result').hidden);
+  check('shareable result page loads saved score', await resultPage.$eval('#score', element => element.textContent === '1,000'));
+  if (process.env.SMOKE_SHOT) await resultPage.screenshot({ path: process.env.SMOKE_SHOT.replace(/\.png$/, '-result.png') });
+  const png = await resultPage.evaluate(() => new Promise(resolve => {
+    const original = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = async function () {
+      HTMLAnchorElement.prototype.click = original;
+      const bytes = new Uint8Array(await (await fetch(this.href)).arrayBuffer());
+      resolve({ name: this.download, bytes: bytes.length, signature: [...bytes.slice(0, 8)] });
+    };
+    document.getElementById('download').click();
+  }));
+  check('downloadable scoreboard is a real PNG', png.bytes > 1000 && png.signature.join(',') === '137,80,78,71,13,10,26,10', `${png.bytes} bytes`);
+  await page.goto(`http://127.0.0.1:${PORT}/?qa&quality=low`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await waitForState(page, () => Boolean(window.__NEON_QA__ && window.__NEON_3D__), 10000);
+
+  await page.select('#loadoutWeapon','5');
+  await page.evaluate(()=>document.querySelector('[data-goto="screenOps"]').click());
+  await page.evaluate(()=>document.querySelector('#screenOps [data-goto="screenDeploy"]').click());
+  if(process.env.SMOKE_SHOT){await new Promise(resolve=>setTimeout(resolve,450));await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-loadout.png')});}
   await page.evaluate(() => document.getElementById('deployButton').click());
   await waitForState(page, () => window.__NEON_QA__.snapshot().mode === 'playing', 5000);
   check('deploy starts a run', true);
+  const tactical=await page.evaluate(()=>window.__NEON_QA__.tacticalProbe());
+  check('AI observes then searches the last-known position instead of tracking through cover',tactical.observed&&tactical.searchesLastKnown,JSON.stringify(tactical));
+  check('reinforcement routing avoids nearby and visible forward spawn positions',tactical.safeEntries&&tactical.count>0);
+  await page.evaluate(()=>document.exitPointerLock?.());
+  await page.waitForFunction(()=>!document.pointerLockElement);
+  check('on-foot radio is hidden and stopped without synthesized playback',await page.evaluate(()=>document.getElementById('gameRadio').hidden&&window.__NEON_QA__.radioStatus().state==='stopped'&&window.__NEON_QA__.radioStatus().synthSteps===0));
+  await page.keyboard.press('n');
+  check('radio shortcut does not start playback on foot',await page.evaluate(()=>window.__NEON_QA__.radioStatus().state==='stopped'));
+  check('selected LMG loadout deploys', await page.evaluate(()=>window.__NEON_QA__.snapshot().weapon==='lmg'));
+  const supplies=await page.evaluate(()=>({health:window.__NEON_QA__.supplyTest('health'),ammo:window.__NEON_QA__.supplyTest('ammo'),gun:window.__NEON_QA__.supplyTest('weapon')}));
+  check('health and ammo collect in gameplay',supplies.health.health===78&&supplies.ammo.reserve>0);
+  check('gun pickup equips LMG',supplies.gun.weapon==='lmg');
+  check('mission instruction stays visible',await page.$eval('#missionInstruction',e=>{
+    const rect=e.getBoundingClientRect(),style=getComputedStyle(e);
+    return /^1\/5 · Reach .+ · follow the marker · .+ · \d+m$/.test(e.textContent)
+      && rect.width>0 && rect.height>0 && style.visibility!=='hidden' && style.display!=='none';
+  }));
+  await page.evaluate(()=>window.__NEON_QA__.equipWeapon(0));
+  await page.evaluate(()=>window.__NEON_QA__.setInvulnerable(true));
+  const fenceTop=await page.evaluate(()=>window.__NEON_QA__.setLandingTest(17.5,9.5));
+  await waitForState(page,()=>window.__NEON_QA__.snapshot().grounded,8000);
+  check('player lands and remains standing on a fence',await page.evaluate(expected=>Math.abs(window.__NEON_QA__.snapshot().z-expected)<.01,fenceTop));
+  const barrierTop=await page.evaluate(()=>window.__NEON_QA__.setLandingTest(10.2,8.8));
+  await waitForState(page,()=>window.__NEON_QA__.snapshot().grounded,8000);
+  check('decorative barrier has a real standing surface',await page.evaluate(expected=>Math.abs(window.__NEON_QA__.snapshot().z-expected)<.01,barrierTop));
+  check('taxi can be approached',await page.evaluate(()=>window.__NEON_QA__.besideVehicle(0)));
+  await page.keyboard.press('e');
+  check('keyboard E enters taxi',await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===0));
+  await page.keyboard.press('e');
+  check('keyboard E exits taxi',await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===-1));
+  check('controller taxi can be approached',await page.evaluate(()=>window.__NEON_QA__.besideVehicle(0)));
+  await page.evaluate(()=>{const make=index=>({index,connected:true,mapping:'standard',id:index?'DualSense Wireless Controller':'Idle controller',axes:[0,0,0,0],buttons:Array.from({length:17},()=>({pressed:false,value:0}))});window.__qaPads=[make(0),make(1)];Object.defineProperty(navigator,'getGamepads',{configurable:true,value:()=>window.__qaPads});});
+  await page.evaluate(()=>window.__qaPads[1].buttons[3]={pressed:true,value:1});await waitForState(page,()=>window.__NEON_QA__.snapshot().carIndex===0);
+  await new Promise(resolve=>setTimeout(resolve,250));check('Triangle enters once while held with an idle first controller',await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===0));
+  await page.evaluate(()=>window.__qaPads[1].buttons[3]={pressed:false,value:0});await new Promise(resolve=>setTimeout(resolve,200));await page.evaluate(()=>window.__qaPads[1].buttons[3]={pressed:true,value:1});await waitForState(page,()=>window.__NEON_QA__.snapshot().carIndex===-1);check('Triangle exits on the next press',true);
+  await page.evaluate(()=>{window.__qaPads[1].buttons[3]={pressed:false,value:0};window.__qaPads[1].buttons[9]={pressed:true,value:1};});await waitForState(page,()=>window.__NEON_QA__.snapshot().mode==='paused');check('campaign Options pauses the mission',true);await page.evaluate(()=>window.__qaPads[1].buttons[9]={pressed:false,value:0});await new Promise(resolve=>setTimeout(resolve,200));await page.evaluate(()=>window.__qaPads[1].buttons[9]={pressed:true,value:1});await waitForState(page,()=>window.__NEON_QA__.snapshot().mode==='playing');check('campaign Options resumes the mission',true);await page.evaluate(()=>{delete navigator.getGamepads;delete window.__qaPads;});
+  await waitForState(page,()=>Number(document.getElementById('radar').dataset.enemies)>0);check('tactical campaign map is visible and marks living enemies',await page.$eval('#radarWrap',el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(el).display!=='none';}));
+  check('tricycle can be approached',await page.evaluate(()=>window.__NEON_QA__.besideVehicle(3)));
+  await page.evaluate(()=>document.exitPointerLock());
+  await waitForState(page,()=>!document.pointerLockElement);
+  await waitForState(page,()=>!document.getElementById('vehicleButton').hidden);
+  await page.click('#vehicleButton');
+  check('visible interaction button enters yellow tricycle',await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===3));
+  check('keke shows honest unconfigured live-radio state, not game music',await page.evaluate(()=>{const r=window.__NEON_QA__.radioStatus();return !document.getElementById('gameRadio').hidden&&r.vehicle==='tricycle'&&r.state==='unconfigured'&&r.synthSteps===0;}));
+  await page.click('#vehicleButton');
+  check('visible interaction button exits yellow tricycle',await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===-1));
+  for(let index=0;index<8;index++){
+    check(`fleet vehicle ${index} can be approached`,await page.evaluate(i=>window.__NEON_QA__.besideVehicle(i),index));
+    await page.keyboard.press('e');
+    check(`fleet vehicle ${index} boards without mission lock`,await page.evaluate(i=>window.__NEON_QA__.snapshot().carIndex===i,index));
+    if(index===7){
+      check('bus shows vehicle-only live-radio controls',await page.$eval('#gameRadio',e=>!e.hidden&&e.textContent.includes('Tune Nigerian radio')));
+      const camera=await page.evaluate(()=>window.__NEON_QA__.vehicleCamera());
+      check('bus chase camera clears the body and roof',camera.clearance>.4&&camera.eyeHeight>camera.roofHeight,JSON.stringify(camera));
+      if(process.env.SMOKE_SHOT){await new Promise(resolve=>setTimeout(resolve,300));await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-bus-radio.png')});}
+    }
+    await page.keyboard.press('e');
+    check(`fleet vehicle ${index} exits`,await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===-1));
+  }
+  check('outer district taxi can be approached',await page.evaluate(()=>window.__NEON_QA__.besideVehicle(5)));
+  await page.keyboard.press('e');
+  const driveStart=await page.evaluate(()=>window.__NEON_QA__.worldSnapshot().cars[5]);
+  await page.keyboard.down('w');
+  try{await page.waitForFunction(start=>window.__NEON_QA__.worldSnapshot().cars[5].x>start+6,{timeout:30000},driveStart.x);}finally{await page.keyboard.up('w');}
+  const driveEnd=await page.evaluate(()=>window.__NEON_QA__.worldSnapshot().cars[5]);
+  check('taxi drives through expanded district corridor',driveEnd.x-driveStart.x>6&&Math.abs(driveEnd.y-driveStart.y)<.5,`distance=${(driveEnd.x-driveStart.x).toFixed(1)}`);
+  await page.keyboard.press('e');
+  await page.evaluate(()=>window.__NEON_QA__.teleport(11.5,18.5));
 
   await page.evaluate(() => { window.__NEON_QA__.setInvulnerable(true); window.__NEON_QA__.skipWait(); });
   await waitForState(page, () => window.__NEON_QA__.snapshot().enemies > 0, 8000);
@@ -63,6 +218,8 @@ try {
   }
   const finale = await page.evaluate(() => window.__NEON_QA__.snapshot());
   check('mission advances to extraction stage', finale.missionStage === 4, `stage=${finale.missionStage}`);
+  await page.evaluate(()=>window.__NEON_QA__.besideVehicle(7));await page.keyboard.press('e');
+  check('bus remains boardable during extraction',await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===7));await page.keyboard.press('e');
 
   // Movement + physics still integrate.
   await page.evaluate(() => window.__NEON_QA__.teleport(11.5, 18.5));
@@ -100,13 +257,25 @@ try {
 
   // Second scenario: select operation 2 (NIGHT RAPTOR) from the menu and play
   // it through every stage type — reach, defend, hvt, extract.
-  await page.goto(`http://127.0.0.1:${PORT}/?qa`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.goto(`http://127.0.0.1:${PORT}/?qa&quality=low`, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await waitForState(page, () => Boolean(window.__NEON_QA__), 10000);
+  await waitForState(page,()=>document.getElementById('accountName').textContent.includes('USERNAME RESERVED'));
+  check('returning player is signed in without re-entering credentials',await page.evaluate(()=>document.getElementById('accountGate').classList.contains('hidden')));
   await page.evaluate(() => document.querySelector('[data-operation="1"]').click());
+  await page.evaluate(()=>document.querySelector('[data-time="night"]').click());
   await page.evaluate(() => document.getElementById('deployButton').click());
   await waitForState(page, () => window.__NEON_QA__.snapshot().mode === 'playing', 5000);
   const op2 = await page.evaluate(() => window.__NEON_QA__.snapshot());
   check('operation 2 deploys', op2.operation === 1, `operation=${op2.operation}`);
+  await waitForState(page,()=>document.body.classList.contains('three-ready')&&window.__NEON_RENDER_STATS__?.().calls>0);check('campaign night selection runs genuine 3D gameplay',op2.timeOfDay==='night');if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-night.png')});
+  check('night lighting never automatically enables night vision',await page.evaluate(()=>!document.body.classList.contains('nvg-active')&&!window.__NEON_3D__.frame().nightVision));
+  await page.keyboard.press('KeyB');await waitForState(page,()=>document.body.classList.contains('nvg-active'));await page.keyboard.press('KeyB');await waitForState(page,()=>!document.body.classList.contains('nvg-active'));check('night vision is an explicit reversible control',true);
+  await page.keyboard.press('KeyV');await waitForState(page,()=>window.__NEON_RENDER_STATS__().localPlayerVisible);check('third person submits a visible player model',true);if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-third-person.png')});await page.keyboard.press('KeyV');await waitForState(page,()=>!window.__NEON_RENDER_STATS__().localPlayerVisible);
+  await page.keyboard.press('Escape');await page.select('#campaignTime','day');await page.keyboard.press('Escape');await waitForState(page,()=>window.__NEON_QA__.snapshot().mode==='playing'&&window.__NEON_QA__.snapshot().timeOfDay==='day');check('Night Raptor campaign can switch to daylight without restarting',true);
+  check('civilian routes and armory render in the campaign',await page.evaluate(()=>window.__NEON_RENDER_STATS__().civilianCount>=6&&window.__NEON_RENDER_STATS__().shopVisible));
+  await page.evaluate(()=>window.__NEON_QA__.equipWeapon(3));check('unearned unpurchased marksman rifle remains locked',await page.evaluate(()=>window.__NEON_QA__.snapshot().weapon!=='dmr'));
+  await page.evaluate(async()=>{const p=window.__NEON_3D__.frame().gunShop;window.__NEON_QA__.teleport(p.x,p.y);const {accountUser}=await import('/accounts.js');localStorage.setItem(`neon-wallet:${accountUser().id}`,JSON.stringify({credits:300,owned:[]}));});
+  await page.keyboard.press('KeyE');await waitForState(page,()=>!document.getElementById('gunShopPanel').hidden);await page.evaluate(()=>document.querySelectorAll('#shopWeapons button')[3].click());check('armory spends earned credits and equips purchased marksman rifle',await page.evaluate(()=>window.__NEON_QA__.snapshot().weapon==='dmr'&&document.getElementById('shopBalance').textContent.startsWith('60 earned')));if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-armory.png')});await page.keyboard.press('Escape');
   check('operation 2 has its own objective', op2.objective === 'REACH THE EASTERN RELAY POST', op2.objective);
   await page.evaluate(() => { window.__NEON_QA__.setInvulnerable(true); });
   for (let stage = 0; stage < 4; stage++) {
@@ -119,7 +288,7 @@ try {
 
   // Third scenario: boss phase escalation. Jump to the HVT stage, wound the
   // commander past a phase threshold, and confirm reinforcements + rage buffs.
-  await page.goto(`http://127.0.0.1:${PORT}/?qa`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.goto(`http://127.0.0.1:${PORT}/?qa&quality=low`, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await waitForState(page, () => Boolean(window.__NEON_QA__), 10000);
   await page.evaluate(() => document.getElementById('deployButton').click());
   await waitForState(page, () => window.__NEON_QA__.snapshot().mode === 'playing', 5000);
@@ -127,22 +296,130 @@ try {
   await new Promise(resolve => setTimeout(resolve, 400));
   const beforePhase = await page.evaluate(() => window.__NEON_QA__.snapshot());
   await page.evaluate(() => window.__NEON_QA__.damageCommander(.4));
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await page.waitForFunction(count=>window.__NEON_QA__.snapshot().enemies>count,{timeout:15000},beforePhase.enemies);
   const afterPhase = await page.evaluate(() => window.__NEON_QA__.snapshot());
   check('boss phase 2 summons reinforcements', afterPhase.enemies > beforePhase.enemies, `enemies ${beforePhase.enemies} -> ${afterPhase.enemies}`);
   await page.evaluate(() => window.__NEON_QA__.damageCommander(.35));
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await page.waitForFunction(count=>window.__NEON_QA__.snapshot().enemies>count,{timeout:15000},afterPhase.enemies);
   const finalPhase = await page.evaluate(() => window.__NEON_QA__.snapshot());
   check('boss phase 3 summons more reinforcements', finalPhase.enemies > afterPhase.enemies, `enemies ${afterPhase.enemies} -> ${finalPhase.enemies}`);
 
   // Progression: with no career stats (offline dev), the NX-7 must stay locked.
   await page.evaluate(() => window.__NEON_QA__.equipWeapon(3));
   const lockedTry = await page.evaluate(() => window.__NEON_QA__.snapshot());
-  check('locked weapon cannot be equipped', lockedTry.weapon !== 'dmr', `weapon=${lockedTry.weapon}`);
+  check('purchased weapon stays owned across reload', lockedTry.weapon === 'dmr', `weapon=${lockedTry.weapon}`);
   await page.evaluate(() => window.__NEON_QA__.equipWeapon(1));
   const shotgunTry = await page.evaluate(() => window.__NEON_QA__.snapshot());
   check('unlocked weapon swaps normally', shotgunTry.weapon === 'shotgun', `weapon=${shotgunTry.weapon}`);
 
+  check('no synthesized soundtrack is masquerading as radio',await page.evaluate(()=>window.__NEON_QA__.radioStatus().synthSteps===0));
+  await page.evaluate(()=>{window.__NEON_QA__.setInvulnerable(true);window.__NEON_QA__.prepareDestructionTest();for(let n=0;n<10;n++)window.__NEON_QA__.fireTestRound();});
+  check('taxi survives the first ten bullets',await page.evaluate(()=>!window.__NEON_QA__.worldSnapshot().cars[6].destroyed));
+  await page.evaluate(()=>{for(let n=0;n<60;n++)window.__NEON_QA__.fireTestRound();});
+  check('sustained player fire destroys taxis',await page.evaluate(()=>window.__NEON_QA__.worldSnapshot().cars[6].destroyed));
+  await page.evaluate(()=>window.__NEON_QA__.prepareGlassTest());
+  check('glass fixture begins on foot with a loaded weapon',await page.evaluate(()=>{const s=window.__NEON_QA__.checkpointInfo();return s.player.ammo>0&&s.player.carIndex===-1&&!s.player.reloading;}));
+  await page.keyboard.down('Shift');
+  try{await page.waitForFunction(()=>window.__NEON_QA__.snapshot().brokenGlass>0,{timeout:15000});}
+  finally{await page.keyboard.up('Shift');}
+  await page.waitForFunction(()=>!window.__NEON_CITY__.inspectCell(5,3).visible,{timeout:15000});
+  check('Shift fire shatters glass in genuine 3D',true);
+
+  for(const arena of ['city-gate','millennium-park','jabi-lake']){
+    await page.goto(`http://127.0.0.1:${PORT}/?qa&quality=low`,{waitUntil:'domcontentloaded'});
+    await waitForState(page,()=>Boolean(window.__NEON_QA__ && window.__NEON_CITY__));
+    await page.select('#arenaSelect',arena);
+    await page.evaluate(()=>document.getElementById('deployButton').click());
+    await waitForState(page,()=>document.body.classList.contains('three-ready') && window.__NEON_CITY__.arena===window.__NEON_QA__.worldSnapshot().arena);
+    const layout=await page.evaluate(()=>{const world=window.__NEON_QA__.worldSnapshot();let matched=true;for(let y=0;y<world.cells.length;y++)for(let x=0;x<world.cells[y].length;x++){const cell=window.__NEON_CITY__.inspectCell(x,y);if(cell.present!==(world.cells[y][x]>0))matched=false;}const stats=window.__NEON_RENDER_STATS__();return {arena:world.arena,matched,calls:stats.calls,triangles:stats.triangles};});
+    check(`${arena} selects a matching genuine 3D layout`,layout.arena===arena && layout.matched && layout.calls>0 && layout.triangles>0,JSON.stringify(layout));
+    await page.evaluate(()=>{window.__NEON_QA__.setInvulnerable(true);window.__NEON_QA__.teleport(12,17.5);});
+    await new Promise(resolve=>setTimeout(resolve,3000));
+    if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,`-${arena}.png`)});
+  }
+  }
+  await page.setViewport({width:844,height:390,isMobile:true,hasTouch:true,deviceScaleFactor:1});
+  await page.goto(`http://127.0.0.1:${PORT}/?qa&quality=low`,{waitUntil:'domcontentloaded'});
+  await waitForState(page,()=>Boolean(window.__NEON_QA__));
+  await page.evaluate(()=>document.getElementById('deployButton').click());
+  await waitForState(page,()=>window.__NEON_QA__.snapshot().mode==='playing');
+  await page.evaluate(()=>{window.__NEON_QA__.setInvulnerable(true);window.__NEON_QA__.besideVehicle(0);});
+  await waitForState(page,()=>!document.getElementById('vehicleButton').hidden);
+  const button=await page.$('#vehicleButton'),rect=await button.boundingBox();
+  await page.touchscreen.tap(rect.x+rect.width/2,rect.y+rect.height/2);
+  check('touch enters taxi without look-zone interception',await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===0));
+  check('mobile radio appears only while driving',await page.evaluate(()=>!document.getElementById('gameRadio').hidden));
+  await page.touchscreen.tap(rect.x+rect.width/2,rect.y+rect.height/2);
+  check('touch exits taxi',await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===-1));
+  check('mobile exit hides radio and stops playback',await page.evaluate(()=>document.getElementById('gameRadio').hidden&&window.__NEON_QA__.radioStatus().state==='stopped'));
+  const orientationBefore=await page.evaluate(()=>window.__NEON_QA__.snapshot());
+  await page.setViewport({width:390,height:844,isMobile:true,hasTouch:true,deviceScaleFactor:1});
+  await page.waitForFunction(()=>matchMedia('(orientation:portrait)').matches&&document.getElementById('threeGame').clientHeight>document.getElementById('threeGame').clientWidth);
+  const touchLayout=await page.evaluate(()=>{
+    const ids=['joystickZone','fireButton','reloadButton','jetButton','pauseButton','touchMoreButton'];
+    return ids.map(id=>{const element=document.getElementById(id),rect=element.getBoundingClientRect();return {id,width:rect.width,height:rect.height,inBounds:rect.x>=0&&rect.y>=0&&rect.right<=innerWidth&&rect.bottom<=innerHeight,reachable:element.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2))};});
+  });
+  check('portrait controls have reachable 44px targets inside the viewport',touchLayout.every(control=>control.inBounds&&control.reachable&&control.width>=44&&control.height>=44),JSON.stringify(touchLayout.filter(control=>!control.inBounds||!control.reachable||control.width<44||control.height<44)));
+  check('pause does not cover the mission instruction',await page.evaluate(()=>{const a=document.getElementById('pauseButton').getBoundingClientRect(),b=document.getElementById('objectiveBox').getBoundingClientRect();return a.left>=b.right||a.right<=b.left||a.top>=b.bottom||a.bottom<=b.top;}));
+  const orientationAfter=await page.evaluate(()=>window.__NEON_QA__.snapshot());
+  check('rotation preserves active gameplay and mission progress',orientationAfter.mode==='playing'&&orientationAfter.operation===orientationBefore.operation&&orientationAfter.missionStage===orientationBefore.missionStage);
+  await page.evaluate(()=>window.__NEON_QA__.besideVehicle(0));
+  await page.waitForFunction(()=>!document.getElementById('vehicleButton').hidden&&!document.getElementById('vehicleButton').disabled);
+  const portraitVehicle=await page.$('#vehicleButton'),portraitVehicleRect=await portraitVehicle.boundingBox();
+  await page.touchscreen.tap(portraitVehicleRect.x+portraitVehicleRect.width/2,portraitVehicleRect.y+portraitVehicleRect.height/2);
+  check('portrait touch enters taxi on first tap',await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===0));
+  await page.touchscreen.tap(portraitVehicleRect.x+portraitVehicleRect.width/2,portraitVehicleRect.y+portraitVehicleRect.height/2);
+  check('portrait touch exits taxi without a duplicate toggle',await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===-1));
+  const aimButton=await page.$('#adsButton'),aimRect=await aimButton.boundingBox();
+  await page.touchscreen.tap(aimRect.x+aimRect.width/2,aimRect.y+aimRect.height/2);
+  check('primary touch AIM works without opening MORE',await page.evaluate(()=>window.__NEON_QA__.touchInput().aim&&document.getElementById('adsButton').getAttribute('aria-pressed')==='true'));
+  await page.touchscreen.tap(aimRect.x+aimRect.width/2,aimRect.y+aimRect.height/2);
+  check('primary touch AIM toggles off',await page.evaluate(()=>!window.__NEON_QA__.touchInput().aim));
+  const moreButton=await page.$('#touchMoreButton'),moreRect=await moreButton.boundingBox();await page.touchscreen.tap(moreRect.x+moreRect.width/2,moreRect.y+moreRect.height/2);
+  check('secondary mobile controls remain available in MORE',await page.evaluate(()=>!document.getElementById('touchExtras').hidden));
+  const extraTargets=await page.evaluate(()=>Array.from(document.querySelectorAll('#touchExtras button')).map(e=>{const r=e.getBoundingClientRect();return {id:e.id,valid:r.width>=44&&r.height>=44&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))};}));
+  check('disclosed actions remain reachable 44px targets',extraTargets.every(e=>e.valid),JSON.stringify(extraTargets.filter(e=>!e.valid)));
+  const weaponBefore=orientationAfter.weapon,weaponButton=await page.$('#weaponButton'),weaponRect=await weaponButton.boundingBox();
+  await page.touchscreen.tap(weaponRect.x+weaponRect.width/2,weaponRect.y+weaponRect.height/2);
+  check('portrait touch button switches weapons',await page.evaluate(previous=>window.__NEON_QA__.snapshot().weapon!==previous,weaponBefore));
+  await page.touchscreen.tap(moreRect.x+moreRect.width/2,moreRect.y+moreRect.height/2);
+  if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-mobile-portrait.png')});
+  const fireButton=await page.$('#fireButton'),fireRect=await fireButton.boundingBox(),touchClient=await page.createCDPSession();
+  await touchClient.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:fireRect.x+fireRect.width/2,y:fireRect.y+fireRect.height/2,id:1}]});
+  check('touch fire registers while held',await page.evaluate(()=>window.__NEON_QA__.touchInput().fire));
+  await page.setViewport({width:844,height:390,isMobile:true,hasTouch:true,deviceScaleFactor:1});
+  await page.waitForFunction(()=>!window.__NEON_QA__.touchInput().fire&&matchMedia('(orientation:landscape)').matches);
+  await touchClient.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  check('turning to landscape clears held fire without restarting',await page.evaluate(()=>window.__NEON_QA__.snapshot().mode==='playing'));
+  if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-mobile-landscape.png')});
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(()=>window.__NEON_QA__.snapshot().mode==='paused');
+  const savedWorld=await page.evaluate(()=>{document.getElementById('resumeButton').click();window.__NEON_QA__.prepareCheckpointTest();return window.__NEON_QA__.checkpointInfo();});
+  await page.evaluate(()=>document.getElementById('quitButton').click());
+  // Deliberately make session lookup slower than campaign lookup to exercise the identity race.
+  await page.evaluateOnNewDocument(()=>{
+    const originalFetch=window.fetch.bind(window);
+    window.fetch=async(...args)=>{if(String(args[0]).includes('/api/auth/session'))await new Promise(resolve=>setTimeout(resolve,300));return originalFetch(...args);};
+  });
+  await page.reload({waitUntil:'domcontentloaded'});
+  await waitForState(page,()=>!!window.__NEON_QA__&&!document.getElementById('continueButton').classList.contains('hidden')&&/USERNAME RESERVED|VERIFIED OWNER/.test(document.getElementById('accountName').textContent));
+  const resumedWorld=await page.evaluate(()=>{document.getElementById('continueButton').click();document.getElementById('pauseButton').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));return window.__NEON_QA__.checkpointInfo();});
+  check('Continue selects and accepts the exact local checkpoint',await page.evaluate(()=>window.__NEON_QA__.resumeInfo()?.restored),JSON.stringify(await page.evaluate(()=>window.__NEON_QA__.resumeInfo())));
+  const changedKeys=(before,after)=>[...new Set([...Object.keys(before),...Object.keys(after)])].filter(key=>JSON.stringify(before[key])!==JSON.stringify(after[key]));
+  check('reload restores exact position, ammo and occupied vehicle',changedKeys(savedWorld.player,resumedWorld.player).length===0,changedKeys(savedWorld.player,resumedWorld.player).join(', '));
+  check('reload restores mission timers, enemies, pickups and broken glass',changedKeys(savedWorld.world,resumedWorld.world).length===0&&JSON.stringify(resumedWorld.brokenGlass)===JSON.stringify(savedWorld.brokenGlass),changedKeys(savedWorld.world,resumedWorld.world).join(', '));
+  await page.evaluate(()=>document.getElementById('quitButton').click());
+  await page.setViewport({width:390,height:844,isMobile:true,hasTouch:true,deviceScaleFactor:1});
+  if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-mobile-menu.png')});
+  await page.evaluate(()=>{document.querySelector('[data-goto="screenSettings"]').click();for(const detail of document.querySelectorAll('#screenSettings details'))detail.open=true;});
+  await page.waitForFunction(()=>document.getElementById('screenSettings').classList.contains('active'));
+  const menuScroll=await page.evaluate(()=>{const menu=document.getElementById('menuRoot');menu.scrollTop=0;return {height:menu.scrollHeight,client:menu.clientHeight};});
+  check('expanded settings genuinely need vertical scrolling',menuScroll.height>menuScroll.client,JSON.stringify(menuScroll));
+  await touchClient.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:185,y:700,id:2}]});
+  for(const y of [600,500,400,300])await touchClient.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:185,y,id:2}]});
+  await touchClient.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  await page.waitForFunction(()=>document.getElementById('menuRoot').scrollTop>0,{timeout:5000});
+  check('portrait menus scroll with a real touch gesture',menuScroll.height>menuScroll.client);
   check('no uncaught page errors', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
 } catch (error) {
   check('smoke run completed', false, String(error?.message || error));

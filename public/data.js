@@ -2,9 +2,64 @@
 // Pure data module — no DOM, no game-state imports. Consumed by game.js
 // and by the node:test suite.
 
-const MAP_W = 24, MAP_H = 24;
+const MAP_W = 48, MAP_H = 48;
 const GROUND_HEIGHT = .5;
-const WALL_HEIGHTS = {1:1.35,2:2.1,3:1.62,4:1.9};
+const WALL_HEIGHTS = {1:1.35,2:2.1,3:1.62,4:1.9,5:3,6:.65,7:.22,8:.35};
+
+export const ARENAS=[
+  {id:'city-gate',name:'City Gate Approach',description:'Expanded gate district · broad driving corridors, commercial blocks and flanking lanes.',ground:0x8c8170},
+  {id:'millennium-park',name:'Millennium Park',description:'Expanded park district · garden pockets, fountains and connected driving routes.',ground:0x546f45},
+  {id:'jabi-lake',name:'Jabi Lake Waterfront',description:'Expanded waterfront district · lake-edge routes, boardwalks and long sightlines.',ground:0x837b66}
+];
+export const WORLD_COVERS=[
+  ...[[10.2,8.8,0],[13.8,15.2,0],[7.8,12.7,1],[16.2,11.1,1]].map(([x,y,turn])=>({x,y,w:turn?.24:1.35,d:turn?1.35:.24,height:.48,kind:'barrier'})),
+  ...[[8.8,9.15],[14.9,9.2],[8.85,14.85],[15.05,14.8],[3.2,12.5],[20.75,13.8]].map(([x,y])=>({x:x+.14,y:y+.04,w:.9,d:.7,height:.93,kind:'crate'}))
+];
+export const ARENA_COVERS={
+  'city-gate':WORLD_COVERS,
+  'millennium-park':[[9,11.4],[14.8,13],[11.3,16],[12.7,6],[3.2,12.5],[20.75,13.8]].map(([x,y])=>({x,y,w:1.25,d:.5,height:.55,kind:'planter'})),
+  'jabi-lake':[[9,11],[15,13],[11,16],[13,8],[3.2,12.5],[20.75,13.8]].map(([x,y])=>({x,y,w:1.2,d:.45,height:.45,kind:'bench'}))
+};
+// Wide, connected transport corridors are reserved across every district.
+export const DRIVE_LANES=[12,24,36];
+export const DISTRICT_SPAWNS=[[28.5,12.5],[42.5,12.5],[36.5,5.5],[36.5,20.5],[28.5,36.5],[42.5,36.5],[36.5,28.5],[36.5,42.5],[5.5,36.5],[19.5,36.5],[12.5,28.5],[12.5,42.5]];
+export function nearestOpenPoint(point){
+  const [px,py]=point;let best=null,distance=Infinity;
+  for(let y=1;y<MAP_H-1;y++)for(let x=1;x<MAP_W-1;x++){
+    if(map[y][x]!==0||coverAt(x+.5,y+.5))continue;
+    const d=(x+.5-px)**2+(y+.5-py)**2;if(d<distance){best=[x+.5,y+.5];distance=d;}
+  }return best;
+}
+export function separatedSpawn(point,occupied,minDistance=3){
+  for(let radius=0;radius<=8;radius++)for(let step=0;step<(radius?16:1);step++){
+    const angle=step*Math.PI/8,x=point[0]+Math.cos(angle)*radius,y=point[1]+Math.sin(angle)*radius;
+    if(x<1.5||y<1.5||x>MAP_W-1.5||y>MAP_H-1.5||map[Math.floor(y)][Math.floor(x)]!==0||coverAt(x,y))continue;
+    if(occupied.every(e=>Math.hypot(e.x-x,e.y-y)>=minDistance))return[x,y];
+  }return null;
+}
+export function arenaOperation(operation,arenaId){
+  const regions=arenaId==='jabi-lake'?[[36,12],[12,12],[36,36],[12,36]]:arenaId==='millennium-park'?[[12,36],[12,12],[36,12],[36,36]]:[[36,12],[12,12],[12,36],[36,36]];
+  const translate=(point,centre)=>nearestOpenPoint([point[0]-12+centre[0],point[1]-12+centre[1]]);
+  return {...operation,stages:operation.stages.map((stage,index)=>{
+    if(index===4)return {...stage,beacon:arenaId==='jabi-lake'?[43.5,36.5]:arenaId==='millennium-park'?[12.5,43.5]:[36.5,43.5],armObjective:'DRIVE TO THE DISTRICT EXTRACTION BEACON',armAnnounce:'FOLLOW THE AMBER MARKER',armComms:'Vehicle secured. Follow the amber marker along the wide district roads.',comms:'Secure a taxi and follow the marked district extraction route.'};
+    if(index===1)return stage; // Retain the stair/uplink mission's physical building.
+    const centre=regions[index],squad=entries=>entries?.map(([type,x,y,options])=>[type,...translate([x,y],centre),options]);
+    return {...stage,target:translate(stage.target,centre),nodes:stage.nodes?.map(node=>({...node,x:translate([node.x,node.y],centre)[0],y:translate([node.x,node.y],centre)[1]})),squad:squad(stage.squad),reinforcements:stage.reinforcements?.map(wave=>({...wave,squad:squad(wave.squad)})),boss:stage.boss?{...stage.boss,phases:stage.boss.phases?.map(phase=>({...phase,summon:squad(phase.summon)}))}:undefined};
+  })};
+}
+let activeArenaId='city-gate';
+export function coverAt(x,y){return ARENA_COVERS[activeArenaId].find(c=>Math.abs(x-c.x)<=c.w/2&&Math.abs(y-c.y)<=c.d/2);}
+export function supportHeight(x,y,brokenGlass=new Set()){
+  const ix=Math.floor(x),iy=Math.floor(y),type=map[iy]?.[ix];
+  const wall=ix>0&&iy>0&&ix<MAP_W-1&&iy<MAP_H-1&&type&&type!==4?WALL_HEIGHTS[type]:0;
+  return GROUND_HEIGHT+Math.max(wall||0,coverAt(x,y)?.height||0);
+}
+const VEHICLE_BOUNDS=Object.freeze({bus:Object.freeze({halfLength:1.7,halfWidth:.7,height:1.9}),tricycle:Object.freeze({halfLength:.72,halfWidth:.38,height:1.55}),taxi:Object.freeze({halfLength:.98,halfWidth:.46,height:1.15})});
+export function vehicleBounds(car){return VEHICLE_BOUNDS[car.kind]||VEHICLE_BOUNDS.taxi;}
+export function vehicleDistance(car,x,y){
+  const dx=x-car.x,dy=y-car.y,c=Math.cos(car.dir),s=Math.sin(car.dir),{halfLength,halfWidth}=vehicleBounds(car);
+  return Math.hypot(Math.max(0,Math.abs(dx*c+dy*s)-halfLength),Math.max(0,Math.abs(-dx*s+dy*c)-halfWidth));
+}
 
 const DIFFICULTIES = {
   recruit:   { enemyHealth: .82, enemySpeed: .84, enemyDamage: .68, playerDamage: 1.15, label: 'RECRUIT' },
@@ -47,10 +102,43 @@ const WEAPONS = [
   {id:'rifle',name:'VX-9 CARBINE',short:'VX-9',mode:'AUTO',mag:30,reserve:120,reload:1.48,cooldown:.086,damage:27,pellets:1,spread:.014,recoil:.24,recoilClimb:.019,recoilYaw:.009,recover:1.15,zoom:.56,color:'#31f5db'},
   {id:'shotgun',name:'SG-12 COMBAT',short:'SG-12',mode:'PUMP',mag:8,reserve:32,reload:1.9,cooldown:.74,damage:13,pellets:8,spread:.1,recoil:.72,recoilClimb:.048,recoilYaw:.02,recover:.72,zoom:.38,color:'#ffbb55'},
   {id:'pistol',name:'HMX-4 SIDEARM',short:'HMX',mode:'SEMI',mag:12,reserve:60,reload:1.1,cooldown:.2,damage:42,pellets:1,spread:.007,recoil:.32,recoilClimb:.028,recoilYaw:.014,recover:1.35,zoom:.66,color:'#a66cff'},
-  {id:'dmr',name:'NX-7 MARKSMAN',short:'NX-7',mode:'SEMI',mag:10,reserve:50,reload:1.65,cooldown:.38,damage:70,pellets:1,spread:.004,recoil:.48,recoilClimb:.042,recoilYaw:.008,recover:.65,zoom:.76,color:'#ffd257',unlock:{kills:50,label:'50 CAREER ELIMINATIONS'}}
+  {id:'dmr',name:'NX-7 MARKSMAN',short:'NX-7',mode:'SEMI',mag:10,reserve:50,reload:1.65,cooldown:.38,damage:70,pellets:1,spread:.004,recoil:.48,recoilClimb:.042,recoilYaw:.008,recover:.65,zoom:.76,color:'#ffd257',unlock:{kills:50,label:'50 CAREER ELIMINATIONS'}},
+  {id:'smg',name:'KX-5 SUBMACHINE GUN',short:'KX-5',mode:'AUTO',mag:40,reserve:160,reload:1.3,cooldown:.058,damage:18,pellets:1,spread:.025,recoil:.17,recoilClimb:.013,recoilYaw:.012,recover:1.5,zoom:.42,color:'#86e58b'},
+  {id:'lmg',name:'MG-60 SUPPORT GUN',short:'MG-60',mode:'AUTO',mag:75,reserve:225,reload:3.2,cooldown:.105,damage:32,pellets:1,spread:.022,recoil:.4,recoilClimb:.029,recoilYaw:.013,recover:.8,zoom:.5,color:'#ff975d'}
 ];
 
+// Pure supply rules: full resources leave the pickup in the world.
+export function collectSupply(player, kind, weapon) {
+  const rules={health:['health','maxHealth',28,'HEALTH'],armor:['armor','maxArmor',34,'ARMOR'],shield:['shield','maxShield',28,'SHIELD']};
+  if(kind==='ammo'){
+    const before=player.reserve,cap=Math.ceil(weapon.reserve*1.5);
+    player.reserve=Math.min(cap,before+Math.max(8,Math.ceil(weapon.mag*1.2)));
+    return player.reserve>before?`+${player.reserve-before} ${weapon.short} AMMO`:null;
+  }
+  const rule=rules[kind];if(!rule)return null;
+  const [field,max,gain,label]=rule,before=player[field];
+  player[field]=Math.min(player[max],before+gain);
+  if(kind==='shield'&&player[field]>before)player.shieldDelay=0;
+  return player[field]>before?`+${player[field]-before} ${label}`:null;
+}
+
+export function missionInstruction(stage, distance, seconds=0, relays=0, inVehicle=false) {
+  if(stage.type==='defend')return distance<(stage.radius||2.25)?`Stay in the marked zone · ${Math.ceil(seconds)}s remaining`:'Move into the marked zone to start the upload';
+  if(stage.type==='destroy')return `Shoot the marked relay · ${relays} remaining`;
+  if(stage.type==='hvt')return 'Find and defeat the commander · watch for reinforcements';
+  if(stage.type==='extract')return inVehicle?'Drive to the extraction marker to finish the mission':'Enter any vehicle · E / Triangle to enter · or tap Enter';
+  return `Reach ${stage.objective.replace(/^REACH |^ENTER /,'').toLowerCase()} · follow the marker`;
+}
+
 // Passive perks earned through career milestones and applied on deploy.
+export function missionTactic(stage){
+  if(stage.type==='defend')return 'Choose cover inside the upload zone. Watch road approaches; the transfer pauses when you leave.';
+  if(stage.type==='destroy')return 'Locate each relay before exposing yourself. Aim from cover, then move to the next marked relay.';
+  if(stage.type==='hvt')return 'Clear the escorts, watch the commander’s bursts, and reload behind cover. Reinforcements approach from district roads.';
+  if(stage.type==='extract')return 'Choose an intact vehicle. Follow the extraction marker along open roads; the mission ends at the beacon.';
+  return 'Scout the marked approach. Use side streets and cover; reaching the marker matters more than eliminating every patrol.';
+}
+
 // Prefer playstyle tradeoffs (heal/recharge/vehicle) over pure stat bloat.
 const PERKS = [
   {id:'plating',name:'REINFORCED PLATING',desc:'+20 MAX ARMOR',unlock:{victories:1,label:'WIN ANY OPERATION'},apply:{maxArmor:120}},
@@ -82,7 +170,7 @@ const OP_RULES = {
     layoutPatches: { open: [[9,5],[14,5],[9,18],[14,18]], wall: [] }
   },
   'night-raptor': {
-    forceTime: 'night', sightDay: 10.5, sightNight: 6.1, noiseMult: 1.4, stealth: true,
+    forceTime: null, sightDay: 10.5, sightNight: 6.1, noiseMult: 1.4, stealth: true,
     pistolNightBonus: 1.28, vehicleStage: -1, nightVision: true,
     layoutPatches: { open: [[11,8],[12,8],[11,15],[12,15]], wall: [[6,12,1],[17,12,1]] }
   },
@@ -129,9 +217,14 @@ function evaluateMedals(stats) {
 }
 
 const CAR_SPAWNS = [
-  {x:4.5,y:12.2,dir:0,color:'#31f5db'},
-  {x:19.4,y:12.1,dir:Math.PI,color:'#ff536d'},
-  {x:12.1,y:4.5,dir:Math.PI/2,color:'#a66cff'}
+  {x:4.5,y:12.2,dir:0,color:'#23834b',kind:'taxi',name:'ABUJA TAXI'},
+  {x:19.4,y:12.1,dir:Math.PI,color:'#23834b',kind:'taxi',name:'ABUJA TAXI'},
+  {x:12.1,y:4.5,dir:Math.PI/2,color:'#23834b',kind:'taxi',name:'ABUJA TAXI'},
+  {x:10.2,y:18.5,dir:0,color:'#ffd337',kind:'tricycle',name:'YELLOW KEKE'},
+  {x:2.5,y:16.5,dir:Math.PI/2,color:'#ffd337',kind:'tricycle',name:'YELLOW KEKE'}
+  ,{x:36,y:24,dir:0,color:'#23834b',kind:'taxi',name:'ABUJA TAXI'}
+  ,{x:12,y:36,dir:0,color:'#23834b',kind:'taxi',name:'ABUJA TAXI'}
+  ,{x:36,y:36,dir:0,color:'#2873ab',kind:'bus',name:'CAPITAL CITY BUS'}
 ];
 
 const WAVE_TABLE = [
@@ -161,6 +254,7 @@ const MISSIONS = [
 const OPERATIONS = [
   {
     id:'first-strike', name:'FIRST STRIKE', short:'FS',
+    purpose:'Recover the stolen evacuation routes so Abuja district residents can leave safely. Secure the uplink, stop Voss and get the intelligence out.',
     tagline:'Infiltrate the district, steal the intel, burn out.',
     debriefVictory:'The uplink is secured, Commander Voss is down, and Unit 07 extracted with the stolen intelligence.',
     debriefComms:'First Strike is complete. Voss is down and the stolen intelligence is secure.',
@@ -196,6 +290,7 @@ const OPERATIONS = [
   },
   {
     id:'night-raptor', name:'NIGHT RAPTOR', short:'NR',
+    purpose:'The recovered routes exposed a surveillance relay. Disable it before dawn so the evacuation convoy can cross the district undetected.',
     tagline:'Silence the relay network before dawn breaks.',
     debriefVictory:'The relay is scrambled, Raptor Actual is silenced, and the district is dark to enemy eyes.',
     debriefComms:'Night Raptor is complete. Their comms grid is burning and the extraction corridor is clear.',
@@ -231,6 +326,7 @@ const OPERATIONS = [
   },
   {
     id:'iron-harvest', name:'IRON HARVEST', short:'IH',
+    purpose:'The convoy is moving, but the armored foundry threatens its route. Capture the core, disable its relays and stop Warden-6 before extracting.',
     tagline:'Break the titan foundry and salvage the core.',
     debriefVictory:'Warden-6 is scrap, the foundry core is aboard, and their armored program died in the district.',
     debriefComms:'Iron Harvest is complete. The foundry core is secure and their titan line is finished.',
@@ -285,15 +381,25 @@ wallRect(10,10,4,1,3); wallRect(10,13,4,1,3); wallRect(10,11,1,2,3); wallRect(13
 wallRect(3,9,4,1,1); wallRect(17,9,4,1,1); wallRect(3,14,4,1,1); wallRect(17,14,4,1,1);
 wallRect(8,3,1,4,2); wallRect(15,3,1,4,2); wallRect(8,17,1,4,2); wallRect(15,17,1,4,2);
 map[9][5]=0; map[14][18]=0; map[4][8]=0; map[19][15]=0;
-// Immutable snapshot so per-op layout patches can restore + mutate safely.
-const MAP_BASE = map.map(row => row.slice());
 
 function restoreMapBase() {
+  activeArenaId='city-gate';
   for (let y = 0; y < MAP_H; y++) for (let x = 0; x < MAP_W; x++) map[y][x] = MAP_BASE[y][x];
 }
 
-function applyOperationLayout(opId) {
+function applyOperationLayout(opId,arenaId='city-gate') {
   restoreMapBase();
+  activeArenaId=ARENAS.some(a=>a.id===arenaId)?arenaId:'city-gate';
+  for(let y=10;y<=13;y++)for(let x=10;x<=13;x++)map[y][x]=0;
+  if(arenaId==='millennium-park'){
+    for(const [x,y] of [[10,10],[13,10],[10,13],[13,13]])map[y][x]=6;
+    for(const [x,y] of [[11,11],[12,11],[11,12],[12,12]])map[y][x]=8;
+  }else if(arenaId==='jabi-lake'){
+    for(let x=10;x<=13;x++){map[10][x]=7;map[13][x]=7;}
+    for(const [x,y] of [[10,11],[13,11],[10,12],[13,12]])map[y][x]=8;
+  }else{
+    for(const [x,y] of [[10,10],[13,10],[10,13],[13,13]])map[y][x]=5;
+  }
   const patches = OP_RULES[opId]?.layoutPatches;
   if (!patches) return;
   for (const [x, y] of patches.open || []) {
@@ -301,6 +407,19 @@ function applyOperationLayout(opId) {
   }
   for (const [x, y, type = 1] of patches.wall || []) {
     if (y > 0 && y < MAP_H - 1 && x > 0 && x < MAP_W - 1) map[y][x] = type;
+  }
+  // Distinct outer neighbourhoods; leave roads and junctions completely clear.
+  for(let y=26;y<46;y++)for(let x=2;x<46;x++){
+    if(DRIVE_LANES.some(lane=>Math.abs(x+.5-lane)<3||Math.abs(y+.5-lane)<3))continue;
+    if(activeArenaId==='city-gate'&&x%12>=4&&x%12<=7&&y%12>=4&&y%12<=7)map[y][x]=2;
+    if(activeArenaId==='millennium-park'&&y%10===8&&x%10>=4&&x%10<=7)map[y][x]=6;
+    if(activeArenaId==='jabi-lake'&&x>=39&&y>=27&&y<=32)map[y][x]=7;
+  }
+  for(let y=2;y<22;y++)for(let x=27;x<46;x++){
+    if(DRIVE_LANES.some(lane=>Math.abs(x+.5-lane)<3||Math.abs(y+.5-lane)<3))continue;
+    if(activeArenaId==='city-gate'&&x%12>=4&&x%12<=7&&y%12>=4&&y%12<=7)map[y][x]=2;
+    if(activeArenaId==='millennium-park'&&x%10===8&&y%10>=4&&y%10<=7)map[y][x]=6;
+    if(activeArenaId==='jabi-lake'&&x>=39&&y>=3&&y<=8)map[y][x]=7;
   }
 }
 
@@ -314,6 +433,16 @@ function buildInterior(x,y,w,h,doorX,doorY){
 buildInterior(3,3,6,6,5,8);map[3][5]=4;map[5][3]=4;map[5][8]=4;
 buildInterior(15,15,6,6,18,15);map[20][18]=4;map[17][15]=4;map[17][20]=4;
 const STAIR_ZONES=[{x1:4,x2:5.9,y1:4,y2:7.6,axis:'y',reverse:true},{x1:18.1,x2:20,y1:16,y2:19.6,axis:'y',reverse:false}];
+// Capture the completed world, including interiors, before any arena mutation.
+const MAP_BASE=map.map(row=>row.slice());
+// Generate independent server room data without changing campaign map/cover
+// selection. This helper is synchronous; no room retains shared mutable cells.
+export function snapshotArena(arenaId){
+  if(!ARENAS.some(a=>a.id===arenaId))throw Error('Unsupported arena.');
+  const savedMap=map.map(row=>row.slice()),savedArena=activeArenaId;
+  try{applyOperationLayout('first-strike',arenaId);return {map:map.map(row=>row.slice()),covers:ARENA_COVERS[arenaId].map(c=>({...c})),arena:arenaId};}
+  finally{for(let y=0;y<map.length;y++)map[y].splice(0,map[y].length,...savedMap[y]);activeArenaId=savedArena;}
+}
 
 export { MAP_W, MAP_H, GROUND_HEIGHT, WALL_HEIGHTS, DIFFICULTIES, ENEMY_TYPES, WEAPONS, PERKS,
   STAGE_TYPES, BOSS_ABILITIES, OP_RULES, MEDAL_DEFS, DAILY_MODIFIERS, dailySeed, dailyModifier, evaluateMedals,

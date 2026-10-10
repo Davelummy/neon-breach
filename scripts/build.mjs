@@ -38,6 +38,23 @@ let gameJs = await readFile('public/game.js', 'utf8');
 let dataJs = await readFile('public/data.js', 'utf8');
 let audioJs = await readFile('public/audio.js', 'utf8');
 let serviceWorker = await readFile('public/sw.js', 'utf8');
+const communityJs = await minifyEsm(await readFile('public/community.js', 'utf8'), 'community.js');
+const accountsJs = await minifyEsm(await readFile('public/accounts.js','utf8'),'accounts.js');
+const combatJs = await minifyEsm(await readFile('public/combat-rules.js','utf8'),'combat-rules.js');
+const mobileJs = await minifyEsm(await readFile('public/mobile-controls.js','utf8'),'mobile-controls.js');
+const vehicleRadioJs = await minifyEsm(await readFile('public/vehicle-radio.js','utf8'),'vehicle-radio.js');
+const checkpointJs = await minifyEsm(await readFile('public/checkpoint.js','utf8'),'checkpoint.js');
+const resultsJs = await minifyEsm(await readFile('public/results.js', 'utf8'), 'results.js');
+const resultsHtml = await readFile('public/results.html', 'utf8');
+const multiplayerJs=await minifyEsm(await readFile('public/multiplayer.js','utf8'),'multiplayer.js');
+const multiplayerMovement=await minifyEsm(await readFile('public/multiplayer-movement.js','utf8'),'multiplayer-movement.js');
+const multiplayerHtml=await readFile('public/multiplayer.html','utf8');
+const combatPresentation=await minifyEsm(await readFile('public/combat-presentation.js','utf8'),'combat-presentation.js');
+const combatInterface=await minifyEsm(await readFile('public/combat-interface.js','utf8'),'combat-interface.js');
+const vehiclePresentation=await minifyEsm(await readFile('public/vehicle-presentation.js','utf8'),'vehicle-presentation.js');
+const multiplayerVehicles=await minifyEsm(await readFile('public/multiplayer-vehicles.js','utf8'),'multiplayer-vehicles.js');
+const cityLife=await minifyEsm(await readFile('public/city-life.js','utf8'),'city-life.js');
+const vehicleHandling=await minifyEsm(await readFile('public/vehicle-handling.js','utf8'),'vehicle-handling.js');
 
 // Minify hand-wired ES modules in place (filenames unchanged).
 gameJs = await minifyEsm(gameJs, 'game.js');
@@ -47,16 +64,31 @@ audioJs = await minifyEsm(audioJs, 'audio.js');
 renderUtils = await minifyEsm(renderUtils, 'render-utils.js');
 
 // Content hash for service worker cache busting (dist only).
-const hashSource = [html, gameJs, scene3d, dataJs, audioJs, renderUtils].join('\n');
+const hashSource = [html, gameJs, scene3d, dataJs, audioJs, renderUtils, communityJs, accountsJs, combatJs, mobileJs, vehicleRadioJs, checkpointJs, resultsJs, resultsHtml,multiplayerJs,multiplayerMovement,multiplayerHtml,combatPresentation,combatInterface,vehiclePresentation,multiplayerVehicles,cityLife,vehicleHandling,manifest].join('\n');
 const buildHash = createHash('sha256').update(hashSource).digest('hex').slice(0, 12);
 serviceWorker = serviceWorker.replaceAll('__BUILD_HASH__', buildHash);
 
 await writeFile('dist/game.js', gameJs);
+await writeFile('dist/multiplayer.js',multiplayerJs);
+await writeFile('dist/combat-presentation.js',combatPresentation);
+await writeFile('dist/combat-interface.js',combatInterface);
+await writeFile('dist/vehicle-presentation.js',vehiclePresentation);
+await writeFile('dist/multiplayer-vehicles.js',multiplayerVehicles);
+await writeFile('dist/city-life.js',cityLife);
+await writeFile('dist/vehicle-handling.js',vehicleHandling);
+await writeFile('dist/multiplayer-movement.js',multiplayerMovement);
 await writeFile('dist/scene3d.js', scene3d);
 await writeFile('dist/data.js', dataJs);
 await writeFile('dist/audio.js', audioJs);
 await writeFile('dist/render-utils.js', renderUtils);
 await writeFile('dist/sw.js', serviceWorker);
+await writeFile('dist/community.js', communityJs);
+await writeFile('dist/accounts.js',accountsJs);
+await writeFile('dist/combat-rules.js',combatJs);
+await writeFile('dist/mobile-controls.js',mobileJs);
+await writeFile('dist/checkpoint.js',checkpointJs);
+await writeFile('dist/vehicle-radio.js',vehicleRadioJs);
+await writeFile('dist/results.js', resultsJs);
 
 const threeModule = await readFile('node_modules/three/build/three.module.min.js', 'utf8');
 const threeCore = await readFile('node_modules/three/build/three.core.min.js', 'utf8');
@@ -97,10 +129,26 @@ const binaryAssets = ${JSON.stringify(binaryAssets)};
 const campaignSchema = ${JSON.stringify(campaignSchema)};
 const campaignIndex = ${JSON.stringify(campaignIndex)};
 const assets = {
+  '/multiplayer.html': { body: ${JSON.stringify(multiplayerHtml)}, type: 'text/html; charset=utf-8', cache: 'no-cache' },
+  '/multiplayer.js': { body: ${JSON.stringify(multiplayerJs)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/multiplayer-movement.js': { body: ${JSON.stringify(multiplayerMovement)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/combat-interface.js': { body: ${JSON.stringify(combatInterface)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/vehicle-presentation.js': { body: ${JSON.stringify(vehiclePresentation)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/multiplayer-vehicles.js': { body: ${JSON.stringify(multiplayerVehicles)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/city-life.js': { body: ${JSON.stringify(cityLife)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/vehicle-handling.js': { body: ${JSON.stringify(vehicleHandling)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/vehicle-radio.js': { body: ${JSON.stringify(vehicleRadioJs)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/mobile-controls.js': { body: ${JSON.stringify(mobileJs)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/combat-rules.js': { body: ${JSON.stringify(combatJs)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/accounts.js': { body: ${JSON.stringify(accountsJs)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/community.js': { body: ${JSON.stringify(communityJs)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/results.js': { body: ${JSON.stringify(resultsJs)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/results.html': { body: ${JSON.stringify(resultsHtml)}, type: 'text/html; charset=utf-8', cache: 'no-cache' },
   '/manifest.webmanifest': { body: ${JSON.stringify(manifest)}, type: 'application/manifest+json; charset=utf-8', cache: 'public, max-age=3600' },
   '/sw.js': { body: ${JSON.stringify(serviceWorker)}, type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
   '/icon.svg': { body: ${JSON.stringify(icon)}, type: 'image/svg+xml; charset=utf-8', cache: 'public, max-age=86400' },
   '/scene3d.js': { body: ${JSON.stringify(scene3d)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=3600' },
+  '/combat-presentation.js': { body: ${JSON.stringify(combatPresentation)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=3600' },
   '/render-utils.js': { body: ${JSON.stringify(renderUtils)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=3600' },
   '/game.js': { body: ${JSON.stringify(gameJs)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=3600' },
   '/data.js': { body: ${JSON.stringify(dataJs)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=3600' },

@@ -10,7 +10,7 @@ import {
 const STAGE_TYPE_SET = new Set(STAGE_TYPES);
 const openCell = (x, y) => map[Math.floor(y)]?.[Math.floor(x)] === 0;
 
-test('map is a sealed 24x24 grid with solid boundary', () => {
+test('map is a sealed expanded grid with solid boundary', () => {
   assert.equal(map.length, MAP_H);
   for (const row of map) assert.equal(row.length, MAP_W);
   for (let x = 0; x < MAP_W; x++) {

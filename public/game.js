@@ -1,30 +1,44 @@
+import { fetchJson, startCommunity, publishResult, resultUrl, downloadScorecard } from './community.js';
+import {accountUser,initializeAccounts,showAccountGate} from './accounts.js';
+import {drawCombatRadar,selectConnectedGamepad} from './combat-interface.js';
 import { MAP_W, MAP_H, GROUND_HEIGHT, WALL_HEIGHTS, DIFFICULTIES, ENEMY_TYPES, WEAPONS, PERKS,
   CAR_SPAWNS, WAVE_TABLE, MISSIONS, OPERATIONS, MISSION_CONDITIONS, spawns, map, STAIR_ZONES,
-  OP_RULES, MEDAL_DEFS, dailyModifier, evaluateMedals, applyOperationLayout } from '/data.js';
+  OP_RULES, MEDAL_DEFS, dailyModifier, evaluateMedals, applyOperationLayout, collectSupply, missionInstruction, missionTactic, ARENAS, WORLD_COVERS, ARENA_COVERS, coverAt, supportHeight, vehicleDistance, vehicleBounds, arenaOperation, DISTRICT_SPAWNS, separatedSpawn } from '/data.js';
 import { AudioSystem } from '/audio.js';
+import { requestLandscape, initializeInterface } from '/mobile-controls.js';
+import {LIVE_STATIONS,VehicleRadio,discoverStations,cachedStations} from '/vehicle-radio.js';
+import {rayVehicleDistance,blastDamage,encounterExtras,MAX_LIVE_ENEMIES,vehicleIntegrity,vehicleBallisticDamage,vehicleImpactDamage,enemyPerception,tacticalShotSpread,perceptionDue,shareObservation,reinforcementEntry} from '/combat-rules.js';
+import {captureCheckpoint,restoreCheckpoint} from '/checkpoint.js';
+import {readWallet,buyGun,GUN_PRICES,createCityLife,updateCityLife} from '/city-life.js';
+import {updateVehicleHandling} from '/vehicle-handling.js';
+let accountCheckPending=true;
 
 'use strict';
 
     const TEX = 64;
 
     const $ = (id) => document.getElementById(id);
+    let interfaceStorage;try{interfaceStorage=localStorage;}catch{}
+    initializeInterface(document,interfaceStorage);
     const canvas = $('game');
     const ctx = canvas.getContext('2d', { alpha: false });
     const radar = $('radar');
     const rctx = radar.getContext('2d');
-    const coarsePointer = matchMedia('(pointer: coarse)').matches;
+    // iPads with a trackpad can report a fine primary pointer while still
+    // needing the on-screen controls, including JET, for finger input.
+    const coarsePointer = matchMedia('(any-pointer: coarse)').matches || navigator.maxTouchPoints > 0;
     const compatibilityMode = new URLSearchParams(location.search).get('renderer') === 'compat';
     const lowRenderPreset = compatibilityMode || new URLSearchParams(location.search).get('quality') === 'low' || (()=>{try{return localStorage.getItem('neon-breach-quality')==='low';}catch{return false;}})();
     const TAU = Math.PI * 2;
     const FOV = Math.PI / 3;
 
     const state = {
-      mode: 'menu', difficulty: 'operative', wave: 0, wavePhase: 'idle', waveTimer: 0,
+      mode: 'menu', difficulty: 'operative', arenaId:'city-gate',layoutVersion:0,wave: 0, wavePhase: 'idle', waveTimer: 0,
       pending: [], spawnTimer: 0, initialWaveCount: 0, enemies: [], projectiles: [], pickups: [], particles: [], cars: [],
       lastTime: 0, totalTime: 0, announcementTimer: 0, messageTimer: 0, screenShake: 0, muzzle: 0, melee: 0,
       musicTimer: 0, musicStep: 0, muted: false, touch: coarsePointer, qaInvulnerable: false,
       slowMo:0, eliteSpawned:false, objective:'HOLD THE ARES GRID', threatPulse:0, takedowns:0, roadkills:0, shieldFlash:0, armorFlash:0,
-      timeOfDay:'day', camera:null, squadAlert:0, autoLock:true, lockTarget:null, corpses:[], bloodDecals:[], brokenGlass:new Set(), threeReady:false,gore:true,
+      timeOfDay:'day',nightVision:false,viewMode:'first',civilians:[],gunShop:null, camera:null, squadAlert:0, autoLock:true, lockTarget:null, corpses:[], bloodDecals:[], brokenGlass:new Set(), threeReady:false,gore:true,
       missionStage:0,missionHold:22,missionSpawnStep:0,missionProgress:0,objectiveTarget:[5.5,9.3],commsTimer:0,commander:null,extractionArmed:false,tutorialStep:0,operation:0,
       destroyNodes:[],hitStop:0,finisherCam:null,comboPeak:1,damageTaken:0,daily:null,lastMedals:[],
       familyMode:false,lookSens:1,invertY:false,lastPartyRank:null
@@ -64,22 +78,30 @@ import { AudioSystem } from '/audio.js';
     let textures = [];
     let sprites = {};
     let resizeTimer = 0;
+    let resetTouchInputs=()=>{};
     let audio = null;
+    try{const savedArena=localStorage.getItem('neon-breach-arena');if(ARENAS.some(a=>a.id===savedArena))state.arenaId=savedArena;}catch{}
+    let selectedLoadout=0, radioStation=LIVE_STATIONS[0]?.id||'off', radioVolume=.5;
+    try{selectedLoadout=Math.max(0,Math.min(WEAPONS.length-1,Number(localStorage.getItem('neon-breach-loadout'))||0));radioStation=localStorage.getItem('neon-breach-live-radio')||LIVE_STATIONS[0]?.id||'off';radioVolume=Math.max(0,Math.min(1,Number(localStorage.getItem('neon-breach-radio-volume')??.5)));}catch{}
+    // Directory-backed selections are restored after explicit tuning.
+    selectedLoadout=Number.isFinite(selectedLoadout)?Math.floor(selectedLoadout):0;
+    if(!Number.isFinite(radioVolume))radioVolume=.5;
     const campaignCloud = { id:null, active:null, records:[], syncing:false, saveTimer:12, remoteBest:0, pendingStatus:null, offline:false };
     const LOCAL_CAMPAIGN_KEY = 'neon-breach-campaign-v1';
-    function localCampaignState(){try{const value=JSON.parse(localStorage.getItem(LOCAL_CAMPAIGN_KEY)||'null');return value&&typeof value==='object'?value:null;}catch{return null;}}
+    function localCampaignState(){try{const value=JSON.parse(localStorage.getItem(LOCAL_CAMPAIGN_KEY)||'null');return value&&typeof value==='object'&&(!value.owner||value.owner===accountUser()?.id)?value:null;}catch{return null;}}
     function writeLocalCampaign(status,payload){
       const local=localCampaignState()||{active:null,records:[],career:{kills:0,takedowns:0,roadkills:0,victories:0},best_score:0};
+      local.owner=accountUser()?.id;
       const record={...payload,id:Number(payload.id||Date.now()),updated_at:new Date().toISOString()};
-      if(status==='active')local.active=record;
+      if(status==='active'){record.checkpoint=captureCheckpoint(state,player,accountUser()?.id);local.active=record;}
       else{local.active=null;local.records=[record,...(Array.isArray(local.records)?local.records:[])].slice(0,8);}
       local.best_score=Math.max(Number(local.best_score||0),Number(record.score||0));
       local.career={kills:local.records.reduce((sum,row)=>sum+Number(row.kills||0),0),takedowns:local.records.reduce((sum,row)=>sum+Number(row.takedowns||0),0),roadkills:local.records.reduce((sum,row)=>sum+Number(row.roadkills||0),0),victories:local.records.reduce((sum,row)=>sum+(row.status==='victory'?1:0),0)};
-      try{localStorage.setItem(LOCAL_CAMPAIGN_KEY,JSON.stringify(local));}catch{}
+      try{localStorage.setItem(LOCAL_CAMPAIGN_KEY,JSON.stringify(local));record.persisted=true;}catch{record.persisted=false;}
       return record;
     }
     function useLocalCampaign(){
-      const local=localCampaignState();if(!local)return false;
+      const local=localCampaignState();if(!local){campaignCloud.active=null;campaignCloud.records=[];campaignCloud.remoteBest=0;for(const key of Object.keys(career))career[key]=0;return false;}
       campaignCloud.active=local.active||null;campaignCloud.records=Array.isArray(local.records)?local.records:[];campaignCloud.remoteBest=Number(local.best_score||0);campaignCloud.offline=true;
       if(local.career)for(const key of Object.keys(career))career[key]=Number(local.career[key]||0);
       renderCampaignRecords();renderArsenal();return true;
@@ -88,7 +110,13 @@ import { AudioSystem } from '/audio.js';
     // unlocks for weapons and perks are evaluated against these.
     const career = { kills:0, takedowns:0, roadkills:0, victories:0 };
     function meetsUnlock(unlock){return !unlock||Object.entries(unlock).every(([key,value])=>key==='label'||(career[key]||0)>=value);}
-    function weaponUnlocked(index){return meetsUnlock(WEAPONS[index]?.unlock);}
+    function weaponUnlocked(index){return readWallet(interfaceStorage,accountUser()?.id).owned.includes(index)||meetsUnlock(WEAPONS[index]?.unlock);}
+    function saveWallet(wallet){try{interfaceStorage?.setItem(`neon-wallet:${accountUser()?.id}`,JSON.stringify(wallet));return !!interfaceStorage;}catch{return false;}}
+    function toggleNightVision(){state.nightVision=!state.nightVision;updateNightVision();$('nightVisionButton').textContent=state.nightVision?'NVG ON':'NVG OFF';$('nightVisionButton').setAttribute('aria-pressed',String(state.nightVision));showMessage(state.nightVision?'NIGHT VISION ON':'NIGHT VISION OFF');}
+    function toggleView(){state.viewMode=state.viewMode==='first'?'third':'first';$('viewButton').textContent=state.viewMode==='third'?'VIEW 3P':'VIEW 1P';showMessage(state.viewMode==='third'?'THIRD PERSON · V / TOUCH VIEW / CONTROLLER TOUCHPAD':'FIRST PERSON');}
+    function nearGunShop(){return state.gunShop&&player.carIndex<0&&Math.hypot(player.x-state.gunShop.x,player.y-state.gunShop.y)<2;}
+    function renderGunShop(){const wallet=readWallet(interfaceStorage,accountUser()?.id);$('shopBalance').textContent=`${wallet.credits} earned credits · 20 per hostile eliminated · saved on this device`;const list=$('shopWeapons');list.replaceChildren();WEAPONS.forEach((weapon,index)=>{const button=document.createElement('button');button.className='secondary';const owned=weaponUnlocked(index);button.textContent=owned?`Equip ${weapon.name}`:`Buy ${weapon.name} · ${GUN_PRICES[index]} credits`;button.disabled=!owned&&wallet.credits<GUN_PRICES[index];button.onclick=()=>{if(!weaponUnlocked(index)){const next=readWallet(interfaceStorage,accountUser()?.id);if(!buyGun(next,index)||!saveWallet(next)){$('shopStatus').textContent='Purchase could not be saved. No gun was unlocked.';return;}}equipWeapon(index,true);$('shopStatus').textContent=`${weapon.name} equipped`;renderGunShop();renderArsenal();};list.append(button);});}
+    function openGunShop(){if(!nearGunShop())return;pauseGame();$('gunShopPanel').hidden=false;$('modalTitle').textContent='District Armory';$('modalText').textContent='Campaign paused while shopping. Earn credits by completing combat, not by paying money.';renderGunShop();requestAnimationFrame(()=>refreshMenuFocus(true));}
     function perkUnlocked(id){const perk=PERKS.find(p=>p.id===id);return !!perk&&meetsUnlock(perk.unlock);}
     function perkApply(id){return PERKS.find(p=>p.id===id)?.apply||{};}
     function applyPerks(fresh){
@@ -173,11 +201,13 @@ import { AudioSystem } from '/audio.js';
       return c;
     }
 
-    function makeCarSprite(color) {
+    function makeCarSprite(color,kind='taxi') {
       const c=document.createElement('canvas');c.width=240;c.height=140;const g=c.getContext('2d');
+      if(kind==='bus'){g.fillStyle=color;g.fillRect(15,27,210,87);g.fillStyle='#e9eee9';g.fillRect(15,70,210,22);g.fillStyle='#152c39';for(let x=25;x<211;x+=31)g.fillRect(x,34,25,31);g.fillStyle='#101714';for(const x of [49,189]){g.beginPath();g.arc(x,113,17,0,TAU);g.fill();}g.fillStyle='#fff';g.font='bold 12px sans-serif';g.fillText('CAPITAL CITY',65,86);return c;}
+      if(kind==='tricycle'){g.fillStyle='#141a18';g.fillRect(61,29,118,14);g.fillRect(67,43,7,66);g.fillRect(166,43,7,66);g.fillStyle=color;g.fillRect(65,78,110,38);g.fillRect(106,53,28,61);g.fillStyle='#edf4dd';g.fillRect(108,78,24,12);g.fillStyle='#090d0b';for(const [x,y] of [[61,115],[179,115],[120,122]]){g.beginPath();g.ellipse(x,y,12,16,0,0,TAU);g.fill();}return c;}
       g.fillStyle='rgba(0,0,0,.5)';g.beginPath();g.ellipse(120,126,92,10,0,0,TAU);g.fill();
       g.shadowColor=color;g.shadowBlur=28;g.fillStyle=color;g.globalAlpha=.16;g.beginPath();g.ellipse(120,78,104,48,0,0,TAU);g.fill();g.globalAlpha=1;g.shadowBlur=0;
-      const body=g.createLinearGradient(34,50,199,118);body.addColorStop(0,'#26353d');body.addColorStop(.42,'#0d151a');body.addColorStop(1,'#03070a');g.fillStyle=body;g.strokeStyle=color;g.lineWidth=3;
+      const body=g.createLinearGradient(34,50,199,118);body.addColorStop(0,'#f4f4e9');body.addColorStop(.42,color);body.addColorStop(1,'#14422a');g.fillStyle=body;g.strokeStyle=color;g.lineWidth=3;
       g.beginPath();g.moveTo(25,83);g.lineTo(51,55);g.lineTo(83,37);g.lineTo(157,37);g.lineTo(191,56);g.lineTo(216,83);g.lineTo(207,117);g.lineTo(33,117);g.closePath();g.fill();g.stroke();
       g.fillStyle='#07141c';g.beginPath();g.moveTo(66,57);g.lineTo(89,43);g.lineTo(115,43);g.lineTo(115,68);g.lineTo(57,68);g.closePath();g.fill();g.beginPath();g.moveTo(124,43);g.lineTo(152,43);g.lineTo(177,68);g.lineTo(124,68);g.closePath();g.fill();
       g.strokeStyle='rgba(143,235,255,.38)';g.lineWidth=1;g.strokeRect(78,76,84,27);g.fillStyle='#020507';g.fillRect(83,80,74,18);
@@ -194,6 +224,7 @@ import { AudioSystem } from '/audio.js';
       g.fillStyle=color;g.shadowBlur=10;
       if(kind==='health'){g.fillRect(34,23,12,34);g.fillRect(23,34,34,12);}
       else if(kind==='ammo'){g.fillRect(27,25,8,31);g.fillRect(38,21,8,35);g.fillRect(49,25,8,31);}
+      else if(kind==='weapon'){g.fillRect(17,29,47,11);g.fillRect(34,39,9,19);g.fillRect(59,31,14,5);}
       else if(kind==='armor'){g.beginPath();g.moveTo(25,22);g.lineTo(55,22);g.lineTo(62,34);g.lineTo(55,59);g.lineTo(40,68);g.lineTo(25,59);g.lineTo(18,34);g.closePath();g.fill();g.fillStyle='#26343a';g.fillRect(31,29,18,30);}
       else {g.beginPath();g.moveTo(40,20);g.lineTo(57,29);g.lineTo(53,51);g.lineTo(40,61);g.lineTo(27,51);g.lineTo(23,29);g.closePath();g.fill();}
       return c;
@@ -223,7 +254,8 @@ import { AudioSystem } from '/audio.js';
 
     function loadEquipmentAssets(){
       sprites.weapons={};for(const id of ['rifle','shotgun','pistol']){const image=new Image();image.decoding='async';image.onload=()=>{sprites.weapons[id]=image;};image.src=`/assets/fp-${id}.webp`;}
-      sprites.carViews={};for(const [view,src] of Object.entries({front:'/assets/interceptor.webp',side:'/assets/interceptor-side.webp',rear:'/assets/interceptor-rear.webp'})){const car=new Image();car.decoding='async';car.onload=()=>{sprites.carViews[view]=CAR_SPAWNS.map((spawn,index)=>makeTintedAsset(car,spawn.color,index? .075:0));sprites.carViews[`${view}Flip`]=CAR_SPAWNS.map((spawn,index)=>makeTintedAsset(car,spawn.color,index? .075:0,true));if(view==='front')sprites.cars=sprites.carViews.front;};car.src=src;}
+      // Compatibility mode keeps the same taxi/keke identity as the 3D models.
+      sprites.carViews={};
     }
 
     function loadWorldMaterials(){const image=new Image();image.decoding='async';image.onload=()=>{const crops=[[0,96,512,300,'#29464a'],[0,0,512,260,'#30284d'],[0,164,512,260,'#59402e']];textures=[null,...crops.map(([sx,sy,sw,sh,tint],index)=>{const c=document.createElement('canvas');c.width=c.height=TEX;const g=c.getContext('2d');g.drawImage(image,sx,sy,sw,sh,0,0,TEX,TEX);g.globalCompositeOperation='source-atop';g.globalAlpha=index===0 ? .08 : .13;g.fillStyle=tint;g.fillRect(0,0,TEX,TEX);g.globalAlpha=1;g.globalCompositeOperation='source-over';const grad=g.createLinearGradient(0,0,TEX,0);grad.addColorStop(0,'rgba(255,255,255,.06)');grad.addColorStop(.48,'rgba(255,255,255,0)');grad.addColorStop(1,'rgba(0,0,0,.16)');g.fillStyle=grad;g.fillRect(0,0,TEX,TEX);return c;}),makeTexture(4)];};image.src='/assets/facility-wall.webp';}
@@ -231,32 +263,33 @@ import { AudioSystem } from '/audio.js';
     function initAssets() {
       textures=[null,makeTexture(1),makeTexture(2),makeTexture(3),makeTexture(4)];
       for(const type of Object.keys(ENEMY_TYPES))sprites[type]=[0,1,2].map(variant=>makeEnemySprite(type,variant));
-      sprites.cars=CAR_SPAWNS.map(car=>makeCarSprite(car.color));
-      sprites.health=makePickupSprite('health'); sprites.ammo=makePickupSprite('ammo'); sprites.shield=makePickupSprite('shield'); sprites.armor=makePickupSprite('armor');
+      sprites.cars=CAR_SPAWNS.map(car=>makeCarSprite(car.color,car.kind));
+      sprites.health=makePickupSprite('health'); sprites.ammo=makePickupSprite('ammo'); sprites.shield=makePickupSprite('shield'); sprites.armor=makePickupSprite('armor');sprites.weapon=makePickupSprite('weapon');
       loadHumanEnemyAssets();loadEquipmentAssets();loadWorldMaterials();
     }
 
     function resize() {
+      const pitchRatio=canvas.height?player.pitch/canvas.height:0;
       const maxW=coarsePointer?820:(lowRenderPreset?640:1080), scale=coarsePointer?.9:(lowRenderPreset?.52:.82);
       canvas.width=Math.max(480,Math.min(maxW,Math.round(innerWidth*scale)));
       canvas.height=Math.max(270,Math.round(canvas.width*(innerHeight/innerWidth)));
       depthBuffer=new Float32Array(canvas.width);
       wallTopBuffer=new Float32Array(canvas.width);
       wallBottomBuffer=new Float32Array(canvas.width);
-      player.pitch=Math.max(-canvas.height*.2,Math.min(canvas.height*.2,player.pitch));
+      player.pitch=Math.max(-canvas.height*.2,Math.min(canvas.height*.2,pitchRatio*canvas.height));
     }
 
     const glassKey=(x,y)=>`${x},${y}`;
     function solidCell(ix,iy){if(ix<0||iy<0||ix>=MAP_W||iy>=MAP_H)return true;const type=map[iy][ix];return type>0&&!(type===4&&state.brokenGlass.has(glassKey(ix,iy)));}
-    function isWall(x,y) { return solidCell(Math.floor(x),Math.floor(y)); }
+    function isWall(x,y) { return solidCell(Math.floor(x),Math.floor(y))||!!coverAt(x,y); }
     function canMove(x,y,r=.22) { return !isWall(x-r,y-r)&&!isWall(x+r,y-r)&&!isWall(x-r,y+r)&&!isWall(x+r,y+r); }
-    function carBlocked(x,y,r=.24,ignore=-1){return state.cars.some((car,index)=>!car.destroyed&&index!==ignore&&Math.hypot(car.x-x,car.y-y)<r+.58);}
-    function blocksAt(x,y,z){const ix=Math.floor(x),iy=Math.floor(y);if(ix<0||iy<0||ix>=MAP_W||iy>=MAP_H)return true;const type=map[iy][ix];if(!solidCell(ix,iy))return false;const boundary=ix===0||iy===0||ix===MAP_W-1||iy===MAP_H-1,height=boundary?2.55:(WALL_HEIGHTS[type]||1);return z<=height;}
+    function carBlocked(x,y,r=.24,ignore=-1){return state.cars.some((car,index)=>index!==ignore&&vehicleDistance(car,x,y)<r);}
+    function blocksAt(x,y,z){const ix=Math.floor(x),iy=Math.floor(y);if(ix<=0||iy<=0||ix>=MAP_W-1||iy>=MAP_H-1)return true;const cover=coverAt(x,y);if(cover&&z-GROUND_HEIGHT<cover.height-.025)return true;const type=map[iy][ix];if(!solidCell(ix,iy))return false;return z-GROUND_HEIGHT<(WALL_HEIGHTS[type]||1)-.025;}
     function canMovePlayer(x,y,r=.24) { return !blocksAt(x-r,y-r,player.z)&&!blocksAt(x+r,y-r,player.z)&&!blocksAt(x-r,y+r,player.z)&&!blocksAt(x+r,y+r,player.z)&&(player.z>1.12||!carBlocked(x,y,r)); }
     function canMoveEnemy(e,x,y,r){return !blocksAt(x-r,y-r,e.z)&&!blocksAt(x+r,y-r,e.z)&&!blocksAt(x-r,y+r,e.z)&&!blocksAt(x+r,y+r,e.z)&&!carBlocked(x,y,r);}
-    function canMoveVehicle(x,y,index){return canMove(x,y,.58)&&!carBlocked(x,y,.58,index);}
+    function canMoveVehicle(x,y,index){const car=state.cars[index],{halfLength:length,halfWidth:width}=vehicleBounds(car),c=Math.cos(car.dir),s=Math.sin(car.dir);for(const a of [-length,0,length])for(const b of [-width,0,width]){const px=x+a*c-b*s,py=y+a*s+b*c;if(isWall(px,py)||coverAt(px,py)||carBlocked(px,py,.1,index))return false;}return !isWall(x,y);}
     function stairHeight(x,y){for(const stair of STAIR_ZONES)if(x>=stair.x1&&x<=stair.x2&&y>=stair.y1&&y<=stair.y2){let t=(y-stair.y1)/(stair.y2-stair.y1);if(stair.reverse)t=1-t;return GROUND_HEIGHT+t*.82;}return null;}
-    function surfaceHeight(x,y) { const stair=stairHeight(x,y);if(stair!==null)return stair;const ix=Math.floor(x),iy=Math.floor(y),type=ix>=0&&iy>=0&&ix<MAP_W&&iy<MAP_H?map[iy][ix]:0;return ix>0&&iy>0&&ix<MAP_W-1&&iy<MAP_H-1&&solidCell(ix,iy)&&type!==4?(WALL_HEIGHTS[type]||1)+.06:GROUND_HEIGHT; }
+    function surfaceHeight(x,y) { const stair=stairHeight(x,y);if(stair!==null)return stair;return supportHeight(x,y,state.brokenGlass); }
     function normAngle(a) { while(a>Math.PI)a-=TAU; while(a<-Math.PI)a+=TAU; return a; }
 
     function castRay(angle, ox=player.x, oy=player.y, maxDistance=40, rayHeight=GROUND_HEIGHT) {
@@ -277,8 +310,18 @@ import { AudioSystem } from '/audio.js';
       return {dist,type:map[my][mx],texX:tx,side,height:hitHeight,cellX:mx,cellY:my};
     }
 
+    function shatterGlass(ix,iy){
+      const key=glassKey(ix,iy);if(map[iy]?.[ix]!==4||state.brokenGlass.has(key))return false;
+      state.brokenGlass.add(key);for(let i=0;i<16;i++)pushParticle({x:ix+.5,y:iy+.5,z:.35+Math.random()*1.3,vx:(Math.random()-.5)*3.2,vy:(Math.random()-.5)*3.2,vz:.5+Math.random()*2.4,gravity:5.8,life:.45+Math.random()*.35,max:.8,color:i%3?'#bcefff':'#ffffff'});audio?.glass?.();showMessage('GLASS SHATTERED');return true;
+    }
     function breakGlassInDirection(angle,maxDistance=40){
-      const dx=Math.cos(angle),dy=Math.sin(angle);for(let d=.1;d<maxDistance;d+=.08){const x=player.x+dx*d,y=player.y+dy*d,ix=Math.floor(x),iy=Math.floor(y);if(ix<0||iy<0||ix>=MAP_W||iy>=MAP_H)return false;const type=map[iy][ix];if(type===4&&!state.brokenGlass.has(glassKey(ix,iy))){state.brokenGlass.add(glassKey(ix,iy));for(let i=0;i<22;i++)state.particles.push({x,y,z:.35+Math.random()*1.3,vx:(Math.random()-.5)*3.2,vy:(Math.random()-.5)*3.2,vz:.5+Math.random()*2.4,gravity:5.8,life:.45+Math.random()*.35,max:.8,color:i%3?'#bcefff':'#ffffff'});audio?.glass?.();showMessage('GLASS SHATTERED');return true;}if(type>0&&type!==4)return false;}return false;
+      const ray=castRay(angle,player.x,player.y,maxDistance,player.z);
+      return ray.type===4&&ray.dist<=maxDistance&&shatterGlass(ray.cellX,ray.cellY);
+    }
+    function vehicleShot(angle,maxDistance,horizon){
+      let hit=null;
+      for(const car of state.cars){const dist=rayVehicleDistance(player.x,player.y,angle,car,maxDistance);if(dist===null||hit&&dist>=hit.dist)continue;const height=player.z+(canvas.height/2-horizon)*dist/canvas.height;if(height<0||height>vehicleBounds(car).height)continue;hit={car,dist};}
+      return hit;
     }
 
     function lineOfSight(ax,ay,bx,by,rayHeight=GROUND_HEIGHT) {
@@ -294,14 +337,15 @@ import { AudioSystem } from '/audio.js';
         for(const [dx,dy] of dirs){const nx=x+dx,ny=y+dy,nk=key(nx,ny);if(nx>0&&ny>0&&nx<MAP_W-1&&ny<MAP_H-1&&map[ny][nx]===0&&came[nk]===-1){came[nk]=cur;q.push(nk);}}
       }
       if(came[goal]===-1)return [];
-      const path=[];let cur=goal;while(cur!==start&&path.length<60){path.push([cur%MAP_W+.5,((cur/MAP_W)|0)+.5]);cur=came[cur];}path.reverse();return path;
+      const path=[];let cur=goal;while(cur!==start&&path.length<MAP_W*MAP_H){path.push([cur%MAP_W+.5,((cur/MAP_W)|0)+.5]);cur=came[cur];}path.reverse();return path;
     }
 
     function weaponConfig(){return WEAPONS[player.weaponIndex]||WEAPONS[0];}
     function equipWeapon(index,silent=false){
       if(state.mode==='playing'&&state.daily?.rules?.weaponLock!=null&&index!==state.daily.rules.weaponLock){if(!silent)showMessage('DAILY LOCK // WEAPON FIXED');return;}
       if(!silent&&state.mode!=='playing')return;
-      const wrapped=(index+WEAPONS.length)%WEAPONS.length;
+      index=Number.isFinite(Number(index))?Math.trunc(Number(index)):0;
+      const wrapped=((index%WEAPONS.length)+WEAPONS.length)%WEAPONS.length;
       if(!weaponUnlocked(wrapped)){if(!silent)showMessage(`${WEAPONS[wrapped].short} LOCKED // ${WEAPONS[wrapped].unlock?.label||'CAREER MILESTONE'}`);return;}
       if(state.mode==='playing'&&player.weaponSlots[player.weaponIndex])Object.assign(player.weaponSlots[player.weaponIndex],{ammo:player.ammo,reserve:player.reserve});
       player.weaponIndex=wrapped;const cfg=weaponConfig(),slot=player.weaponSlots[player.weaponIndex];
@@ -321,11 +365,13 @@ import { AudioSystem } from '/audio.js';
     function opRules(){return OP_RULES[currentOp()?.id]||OP_RULES['first-strike']||{};}
 
     function setOperation(index,persist=true){
-      const selected=OPERATIONS[index]?index:0,op=OPERATIONS[selected];state.operation=selected;
+      const selected=OPERATIONS[index]?index:0,op=OPERATIONS[selected];state.operation=selected;state.activeOperation=null;
       document.querySelectorAll('[data-operation]').forEach(button=>button.classList.toggle('active',Number(button.dataset.operation)===selected));
-      const deploy=$('deployButton');if(deploy)deploy.textContent=`Deploy ${op.name}`;
+      const deploy=$('deployButton');if(deploy)deploy.textContent=`Start ${op.name}`;
       const brief=$('operationTagline');if(brief)brief.textContent=op.tagline;
-      const deployName=$('deployOpName');if(deployName)deployName.textContent=op.tagline||op.name;
+      const deployName=$('deployOpName');if(deployName)deployName.textContent=`${ARENAS.find(a=>a.id===state.arenaId)?.name} · ${op.name}`;
+      const plan=$('missionPlan');if(plan){plan.replaceChildren();for(const [index,stage] of arenaOperation(op,state.arenaId).stages.entries()){const step=document.createElement('li'),title=document.createElement('strong'),advice=document.createElement('p');title.textContent=`${index+1}. ${stage.objective.toLowerCase()}${stage.type==='defend'?` · hold ${stage.hold}s`:''}`;advice.textContent=missionTactic(stage);step.append(title,advice);plan.append(step);}}
+      if($('missionPurpose'))$('missionPurpose').textContent=op.purpose||op.tagline;
       const rules=OP_RULES[op.id];
       if(rules?.forceTime){setMissionTime(rules.forceTime,false);document.querySelectorAll('[data-time]').forEach(btn=>{btn.disabled=true;btn.classList.toggle('active',btn.dataset.time===rules.forceTime);});}
       else document.querySelectorAll('[data-time]').forEach(btn=>{btn.disabled=false;});
@@ -335,6 +381,8 @@ import { AudioSystem } from '/audio.js';
 
     function showMenuScreen(id){
       document.querySelectorAll('.menu-screen').forEach(el=>el.classList.toggle('active',el.id===id));
+      if(id==='screenMain')document.querySelectorAll('#screenMain details').forEach(el=>el.open=false);
+      updateMissionOptionsSummary();
       menuFocusIndex=0;
       if(id==='screenRanks')loadLeaderboard();
       requestAnimationFrame(()=>refreshMenuFocus(true));
@@ -350,7 +398,7 @@ import { AudioSystem } from '/audio.js';
     function menuFocusables(){
       const root=menuUiRoot();
       if(!root)return[];
-      return Array.from(root.querySelectorAll('button, input, select')).filter(el=>{
+      return Array.from(root.querySelectorAll('button, input, select, summary')).filter(el=>{
         if(el.disabled||el.classList.contains('hidden'))return false;
         if(el.getAttribute('aria-hidden')==='true')return false;
         // Skip display:none / zero-size (hidden continue, etc.)
@@ -531,11 +579,33 @@ import { AudioSystem } from '/audio.js';
       window.__NEON_VOLUME__=linear;
       if(persist){try{localStorage.setItem('neon-breach-volume',String(p));}catch{}}
       if(audio?.master)audio.master.gain.value=state.muted?0:linear;
+      liveRadio.setVolume(radioVolume*linear,state.muted);
       const label=$('volumeValue');
       if(label)label.textContent=`${p}%`;
       return linear;
     }
     function bindMenuNav(){
+      // Keep all sound controls together rather than duplicated across sections.
+      $('audioSettings').append($('settingVolume').closest('.setting-row'));
+      $('landscapeButton')?.addEventListener('click',switchScreenMode);
+      $('screenModeButton')?.addEventListener('click',switchScreenMode);
+      $('portraitButton')?.addEventListener('click',()=>{$('rotatePrompt').classList.add('hidden');});
+      $('touchMoreButton')?.addEventListener('click',()=>{const panel=$('touchExtras'),open=panel.hidden;panel.hidden=!open;$('touchMoreButton').setAttribute('aria-expanded',String(open));input.pointerFire=input.fire=input.shiftFire=false;});
+      const arena=$('arenaSelect');if(arena){for(const value of ARENAS){const option=document.createElement('option');option.value=value.id;option.textContent=value.name;arena.append(option);}arena.value=state.arenaId;arena.addEventListener('change',()=>{state.arenaId=arena.value;try{localStorage.setItem('neon-breach-arena',state.arenaId);}catch{}$('arenaDescription').textContent=ARENAS.find(a=>a.id===state.arenaId).description;setOperation(state.operation,false);});$('arenaDescription').textContent=ARENAS.find(a=>a.id===state.arenaId).description;}
+      // Board on touchdown before movement can hide the proximity button.
+      $('vehicleButton')?.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();toggleVehicle();});
+      $('vehicleButton')?.addEventListener('click',e=>{if(e.detail===0)toggleVehicle();});
+      $('viewButton').onclick=toggleView;$('nightVisionButton').onclick=toggleNightVision;
+      $('pausedNvg').onclick=toggleNightVision;$('pausedView').onclick=toggleView;$('campaignTime').onchange=()=>setMissionTime($('campaignTime').value);
+      const loadout=$('loadoutWeapon');
+      if(loadout){loadout.replaceChildren();WEAPONS.forEach((weapon,index)=>{const option=document.createElement('option');option.value=String(index);option.textContent=`${weapon.name} · ${weapon.mag} rounds${weapon.unlock?' · career unlock required':''}`;loadout.append(option);});loadout.value=String(selectedLoadout);loadout.addEventListener('change',()=>{const index=Number(loadout.value);if(!weaponUnlocked(index)){loadout.value=String(selectedLoadout);$('loadoutHint').textContent=WEAPONS[index].unlock.label;return;}selectedLoadout=index;try{localStorage.setItem('neon-breach-loadout',String(index));}catch{}$('loadoutHint').textContent=`Start with ${WEAPONS[index].name}. Other unlocked guns remain available with 1–6 or weapon cycling.`;});}
+      const station=$('radioStation'),musicVolume=$('radioVolume');
+      if(station){station.replaceChildren();for(const id of radioStations){const option=document.createElement('option');option.value=id;option.textContent=radioNames[id];station.append(option);}station.value=radioStation;station.addEventListener('change',()=>selectRadioStation(station.value));}
+      updateRadioLabel();
+      $('radioPrevious')?.addEventListener('click',()=>cycleRadioStation(-1));
+      $('radioNext')?.addEventListener('click',()=>cycleRadioStation(1));
+      $('radioPlay')?.addEventListener('click',tuneLiveRadio);
+      if(musicVolume){musicVolume.value=String(radioVolume*100);musicVolume.addEventListener('input',()=>{radioVolume=Number(musicVolume.value)/100;try{localStorage.setItem('neon-breach-radio-volume',String(radioVolume));}catch{}liveRadio.setVolume(radioVolume*(state.masterVolume??.28),state.muted);updateRadioLabel();});}
       document.querySelectorAll('[data-goto]').forEach(btn=>{
         btn.addEventListener('click',()=>showMenuScreen(btn.dataset.goto));
       });
@@ -687,7 +757,7 @@ import { AudioSystem } from '/audio.js';
       if(!welcome){prefs.welcomeDone=true;return;}
       welcome.classList.remove('hidden');
       const input=$('welcomeCallsign');
-      if(input){input.value=getCallsign()==='OPERATIVE'?'':getCallsign();setTimeout(()=>input.focus(),80);}
+      if(input){input.value=getCallsign()==='OPERATIVE'?'':getCallsign();if(!input.readOnly)setTimeout(()=>input.focus(),80);}
       let family=prefs.familyMode;
       const fam=$('welcomeFamily'),std=$('welcomeStandard');
       const paint=()=>{fam?.classList.toggle('on',family);std?.classList.toggle('on',!family);};
@@ -820,7 +890,9 @@ import { AudioSystem } from '/audio.js';
       const selected=MISSION_CONDITIONS[time]?time:'day',condition=MISSION_CONDITIONS[selected];state.timeOfDay=selected;const menuRoot=$('menuRoot');if(menuRoot)menuRoot.dataset.time=selected;
       document.querySelectorAll('[data-time]').forEach(button=>button.classList.toggle('active',button.dataset.time===selected));$('missionClock').textContent=condition.clock;$('missionCondition').textContent=condition.condition;$('missionBriefText').textContent=condition.brief;
       if(persist){try{localStorage.setItem('neon-breach-time',selected);}catch{}}
+      updateMissionOptionsSummary();
     }
+    function updateMissionOptionsSummary(){const summary=$('missionOptionsSummary');if(summary)summary.textContent=`${DIFFICULTIES[state.difficulty]?.label||'OPERATIVE'} · ${state.timeOfDay==='night'?'Night':'Day'} · Options`;}
 
     function setAutoLock(enabled,persist=true,announce=true){
       state.autoLock=!!enabled;if(!state.autoLock)state.lockTarget=null;const menuButton=$('autoLockButton'),touchButton=$('lockButton'),badge=$('lockModeBadge');
@@ -844,7 +916,6 @@ import { AudioSystem } from '/audio.js';
       audio?.preloadVoices?.(['breach-inbound','sector-clear','mission-complete','hvt-down','vehicle-lost','game-over','victory']);
       // Browsers suspend AudioContext until a user gesture — always try to wake it.
       try{audio.resume?.();}catch{}
-      try{if(audio.ctx?.state==='suspended')audio.ctx.resume();}catch{}
       let base=state.masterVolume;
       if(base==null||!Number.isFinite(base))base=window.__NEON_VOLUME__;
       if(base==null||!Number.isFinite(base)||base<0)base=.28;
@@ -855,10 +926,13 @@ import { AudioSystem } from '/audio.js';
       state.masterVolume=base;
       window.__NEON_VOLUME__=base;
       if(audio.master)audio.master.gain.value=state.muted?0:Math.max(0.0001,Math.min(1,base));
+      if(audio.musicGain){audio.musicGain.gain.cancelScheduledValues(audio.ctx.currentTime);audio.musicGain.gain.value=0;}
       return audio;
     }
 
     function startGame(saved=null) {
+      if(accountCheckPending){accountInitialization.then(()=>startGame(saved));return;}
+      if(!accountUser()){showAccountGate();return;}
       ensureAudio();
       audio?.stopMenuMusic?.();
       audio?.startHum?.();
@@ -866,10 +940,16 @@ import { AudioSystem } from '/audio.js';
       const rules=opRules();
       if(!saved&&rules.forceTime)setMissionTime(rules.forceTime,false);
       if(!saved&&state.daily?.rules?.forceNight)setMissionTime('night',false);
-      applyOperationLayout(currentOp().id);
+      if(saved){const id=saved.arena||'city-gate';state.arenaId=ARENAS.some(a=>a.id===id)?id:'city-gate';if($('arenaSelect'))$('arenaSelect').value=state.arenaId;}
+      applyOperationLayout(currentOp().id,state.arenaId);state.layoutVersion++;
+      const city=createCityLife(state.arenaId,(x,y)=>canMove(x,y,.25)&&!coverAt(x,y),CAR_SPAWNS);state.civilians=city.civilians;state.gunShop=city.shop;
+      state.nightVision=false;$('nightVisionButton').textContent='NVG OFF';$('nightVisionButton').setAttribute('aria-pressed','false');
+      state.activeOperation=arenaOperation(OPERATIONS[state.operation],state.arenaId);
+      document.querySelector('.brand-lockup span').textContent=`ABUJA · ${ARENAS.find(a=>a.id===state.arenaId).name.toUpperCase()}`;
       const stages=missionStages();
       const resumeStage=saved?Math.max(0,Math.min(stages.length-1,Number(saved.wave||1)-1)):0;
       resetPlayer();
+      if(!saved&&weaponUnlocked(selectedLoadout))equipWeapon(selectedLoadout,true);
       // Family mode: thicker vitals so younger / casual players get a fairer run.
       if(state.familyMode&&!saved){
         player.maxHealth=130;player.health=130;
@@ -878,13 +958,17 @@ import { AudioSystem } from '/audio.js';
         if(!state.autoLock)setAutoLock(true,false,false);
       }
       if(!saved&&state.daily?.rules?.weaponLock!=null)equipWeapon(state.daily.rules.weaponLock,true);
-      const vehicleHp=player.vehicleHp||100;Object.assign(state,{mode:'playing',wave:resumeStage+1,wavePhase:'mission',waveTimer:0,pending:[],spawnTimer:0,initialWaveCount:1,enemies:[],projectiles:[],pickups:[],particles:[],corpses:[],bloodDecals:[],brokenGlass:new Set(),cars:CAR_SPAWNS.map((car,index)=>({...car,index,occupied:false,speed:0,hp:vehicleHp,maxHp:vehicleHp,boost:100,engineTimer:0,steer:0,groundOffset:0})),totalTime:saved?Number(saved.elapsed_seconds||0):0,announcementTimer:0,messageTimer:0,screenShake:0,muzzle:0,melee:0,musicTimer:.2,musicStep:0,slowMo:0,hitStop:0,eliteSpawned:false,objective:stages[resumeStage].objective,objectiveTarget:[...stages[resumeStage].target],missionStage:resumeStage,missionHold:stages[resumeStage].hold||22,missionSpawnStep:0,missionProgress:0,commsTimer:0,commander:null,extractionArmed:false,tutorialStep:saved?99:0,threatPulse:0,takedowns:saved?Number(saved.takedowns||0):0,roadkills:saved?Number(saved.roadkills||0):0,shieldFlash:0,armorFlash:0,squadAlert:0,lockTarget:null,destroyNodes:[],finisherCam:null,comboPeak:1,damageTaken:0,lastMedals:[]});
+      const vehicleHp=perkUnlocked('hull')?perkApply('hull').vehicleHp:100;Object.assign(state,{mode:'playing',wave:resumeStage+1,wavePhase:'mission',waveTimer:0,pending:[],spawnTimer:0,initialWaveCount:1,enemies:[],projectiles:[],pickups:[],particles:[],corpses:[],bloodDecals:[],brokenGlass:new Set(),cars:CAR_SPAWNS.map((car,index)=>({...car,index,occupied:false,speed:0,hp:vehicleIntegrity(car.kind,vehicleHp),maxHp:vehicleIntegrity(car.kind,vehicleHp),boost:100,engineTimer:0,steer:0,groundOffset:0})),totalTime:saved?Number(saved.elapsed_seconds||0):0,announcementTimer:0,messageTimer:0,screenShake:0,muzzle:0,melee:0,musicTimer:.2,musicStep:0,slowMo:0,hitStop:0,eliteSpawned:false,objective:stages[resumeStage].objective,objectiveTarget:[...stages[resumeStage].target],missionStage:resumeStage,missionHold:stages[resumeStage].hold||22,missionSpawnStep:0,missionProgress:0,commsTimer:0,commander:null,extractionArmed:false,tutorialStep:saved?99:0,threatPulse:0,takedowns:saved?Number(saved.takedowns||0):0,roadkills:saved?Number(saved.roadkills||0):0,shieldFlash:0,armorFlash:0,squadAlert:0,lockTarget:null,destroyNodes:[],finisherCam:null,comboPeak:1,damageTaken:0,lastMedals:[]});
       if(saved){player.health=Math.max(1,Number(saved.health||100));player.shield=Math.max(0,Number(saved.shield??50));player.armor=Math.max(0,Number(saved.armor??100));player.score=Number(saved.score||0);player.kills=Number(saved.kills||0);player.shots=Number(saved.shots||0);player.hits=Number(saved.hits||0);equipWeapon(Number(saved.weapon_index||0),true);campaignCloud.id=Number(saved.id);}else campaignCloud.id=null;
       applyPerks(!saved);
       clearMenuFocus();
       $('menuRoot')?.classList.add('hidden'); $('modalScreen').classList.add('hidden'); $('hud').classList.remove('hidden');
       if(coarsePointer)$('touchControls').classList.remove('hidden'); else{pointerWanted=true;requestLock();showMessage('WASD move · click to look');}
-      beginOperation(resumeStage,!!saved);maybeStageVehicle(resumeStage);updateHUD();campaignCloud.saveTimer=12;saveCampaign('active',true);
+      const restored=saved&&restoreCheckpoint(saved.checkpoint,state,player,{owner:accountUser()?.id,width:MAP_W,height:MAP_H,enemyTypes:ENEMY_TYPES,weaponCount:WEAPONS.length,stageCount:stages.length});
+      if(window.__NEON_QA__)state.qaResumeInfo={hasCheckpoint:!!saved?.checkpoint,restored:!!restored,stage:saved?.checkpoint?.world?.missionStage??null};
+      if(restored){updateNightVision();showMessage('EXACT LOCAL RESUME · POSITION AND WORLD RESTORED');}
+      else{beginOperation(resumeStage,!!saved);maybeStageVehicle(resumeStage);if(saved)showMessage('OLDER SAVE · RESUMED AT PHASE CHECKPOINT');}
+      startGameplayRadio();updateHUD();campaignCloud.saveTimer=12;saveCampaign('active',true);
       if(!saved)sendTelemetry('op_start',{operation:state.operation});
     }
 
@@ -893,8 +977,8 @@ import { AudioSystem } from '/audio.js';
       if(rules.vehicleStage!==stage)return;
       const car=state.cars.find(c=>!c.destroyed&&!c.occupied)||state.cars[0];
       if(!car)return;
-      const target=state.objectiveTarget||[11.5,6.5];
-      car.x=target[0]+1.2;car.y=target[1];car.dir=Math.PI/2;car.hp=car.maxHp;
+        const target=state.objectiveTarget||[11.5,6.5];
+      car.x=target[0]+1.2;car.y=target[1];car.dir=Math.PI/2;car.hp=car.maxHp;car.destroyed=false;
       showComms('ARES COMMAND','Interceptor staged for this phase. Board with E / △ — armor denser on the ground.',4.5);
       showMessage('ARES INTERCEPTOR STAGED // VEHICLE PHASE');
     }
@@ -907,11 +991,68 @@ import { AudioSystem } from '/audio.js';
       pointerWanted=true;
       try{const req=canvas.requestPointerLock?.();req?.catch?.(()=>{pointerWanted=false;if(state.mode==='playing')showMessage('CLICK THE VIEW TO CAPTURE MOUSE LOOK // WASD STILL MOVES');});}catch{pointerWanted=false;}
     }
-    function pauseGame(){ if(state.mode!=='playing')return;pointerWanted=false;saveCampaign('active',true);state.mode='paused';input.fire=input.shiftFire=input.pointerFire=input.aim=input.jump=false;freeLook=false;document.exitPointerLock?.();$('modalEyebrow').textContent='PAUSED';$('modalTitle').textContent='Paused';$('modalText').textContent=state.familyMode?'Family mode is on. Click the view to look · R reload · F finisher.':'Resume when ready. Click the view for mouse look · Esc again to resume.';$('resultGrid').classList.add('hidden');$('resultRank')?.classList.remove('show');$('shareScoreButton')?.classList.add('hidden');$('resumeButton').textContent='Resume';$('quitButton').classList.remove('hidden');$('modalScreen').classList.remove('hidden');$('touchControls').classList.add('hidden');menuFocusIndex=0;requestAnimationFrame(()=>refreshMenuFocus(true)); }
-    function resumeGame(){ if(state.mode!=='paused')return;state.mode='playing';$('modalScreen').classList.add('hidden');clearMenuFocus();if(coarsePointer)$('touchControls').classList.remove('hidden');else{pointerWanted=true;requestLock();showMessage('WASD move · click to look');}state.lastTime=performance.now(); }
+    let storedRadioStations=[];try{storedRadioStations=cachedStations(localStorage);}catch{}
+    const liveRadio=new VehicleRadio({stations:storedRadioStations,onChange:()=>updateRadioLabel()});
+    let radioStations=['off',...liveRadio.stations.map(station=>station.id)];
+    let radioNames=Object.fromEntries([['off','Radio off'],...liveRadio.stations.map(station=>[station.id,station.name])]);
+    let radioDiscovering=false;
+    async function tuneLiveRadio(){
+      if(player.carIndex<0||state.mode!=='playing'||radioDiscovering)return;
+      if(!liveRadio.stations.length){
+        radioDiscovering=true;updateRadioLabel();let storage;try{storage=localStorage;}catch{}
+        const stations=await discoverStations({storage});radioDiscovering=false;
+        liveRadio.stations=stations;radioStations=['off',...stations.map(s=>s.id)];radioNames=Object.fromEntries([['off','Radio off'],...stations.map(s=>[s.id,s.name])]);
+        const picker=$('radioStation');picker.replaceChildren();for(const id of radioStations){const option=document.createElement('option');option.value=id;option.textContent=radioNames[id];picker.append(option);}
+        if(stations.length&&!stations.some(s=>s.id===radioStation))radioStation=stations[0].id;
+        if(!stations.length){updateRadioLabel();showMessage('RADIO DIRECTORY UNAVAILABLE · TAP TUNE TO RETRY');return;}
+      }
+      // Playback gate is rechecked after metadata loading: never play on foot.
+      selectRadioStation(radioStation);updateRadioLabel();
+    }
+    function updateRadioLabel(){
+      const car=state.cars?.[player.carIndex],visible=!!car&&state.mode==='playing',status=liveRadio.status();
+      $('gameRadio').hidden=!visible;document.body.classList.toggle('in-vehicle',!!car);
+      $('jetButton').textContent=car?'BOOST':'JET';$('jetButton').setAttribute('aria-label',car?'Hold for vehicle boost':'Hold to jump and fly');
+      const labels={unconfigured:'Tune Nigerian radio',connecting:'Connecting…',buffering:'Buffering…',blocked:'Tap play to listen',unavailable:'Stream unavailable'};
+      $('gameRadioStation').textContent=radioDiscovering?'Finding stations…':state.muted?'Sound muted':radioVolume===0?'Radio volume 0':labels[status.state]||radioNames[radioStation]||'Tune Nigerian radio';
+      const credit=$('radioCredit'),station=liveRadio.stations.find(s=>s.id===radioStation);credit.hidden=!station?.homepage;credit.href=station?.homepage||'https://www.radio-browser.info/';credit.textContent=station?'Station website':'Station website';
+      if($('radioStation'))$('radioStation').value=radioStation;
+      $('radioPrevious').disabled=$('radioNext').disabled=liveRadio.stations.length===0;
+      $('radioPrevious').hidden=$('radioNext').hidden=liveRadio.stations.length===0;
+      $('radioPlay').disabled=radioDiscovering;$('radioPlay').hidden=status.configured&&!['blocked','unavailable'].includes(status.state);$('radioPlay').textContent=status.configured?'▶':'Tune';$('radioPlay').setAttribute('aria-label',status.configured?'Play selected live station':'Discover Nigerian live radio stations');
+      $('gameRadio').setAttribute('aria-label',car?`${car.name} live radio controls`:'Vehicle live radio controls');
+    }
+    function selectRadioStation(station){if(!radioStations.includes(station))return;radioStation=station;try{localStorage.setItem('neon-breach-live-radio',station);}catch{}startGameplayRadio();}
+    function cycleRadioStation(direction){if(player.carIndex<0||state.mode!=='playing')return;selectRadioStation(radioStations[(radioStations.indexOf(radioStation)+direction+radioStations.length)%radioStations.length]);}
+    async function switchScreenMode(){
+      if(document.fullscreenElement){try{screen.orientation?.unlock?.();await document.exitFullscreen();}catch{}return;}
+      const result=await requestLandscape(document,screen.orientation);
+      if($('screenModeStatus'))$('screenModeStatus').textContent=result.message;
+      if(state.mode==='playing')showMessage(result.locked?'LANDSCAPE FULLSCREEN · SCREEN TO EXIT':'ROTATE PHONE SIDEWAYS · DISABLE DEVICE ROTATION LOCK IF NEEDED');
+    }
+    function startGameplayRadio(){audio?.stopRadio();liveRadio.start({inVehicle:player.carIndex>=0,playing:state.mode==='playing',station:radioStation,volume:radioVolume*(state.masterVolume??.28),muted:state.muted});updateRadioLabel();}
+    function pauseGame(){
+      if(state.mode!=='playing')return;
+      $('gunShopPanel').hidden=true;
+      $('campaignTime').value=state.timeOfDay;$('campaignViewOptions').open=false;
+      pointerWanted=false;saveCampaign('active',true);state.mode='paused';audio?.stopRadio();liveRadio.stop();updateRadioLabel();$('touchExtras').hidden=true;$('touchMoreButton').setAttribute('aria-expanded','false');
+      resetTouchInputs();for(const key of Object.keys(input))input[key]=typeof input[key]==='number'?0:false;moveAxis.x=moveAxis.y=controllerAxis.x=controllerAxis.y=0;
+      input.fire=input.shiftFire=input.pointerFire=input.aim=input.jump=false;
+      freeLook=false;document.exitPointerLock?.();
+      $('modalEyebrow').textContent='PAUSED';$('modalTitle').textContent='Paused';
+      $('modalText').textContent=campaignCloud.active?.persisted?'Position and world saved on this device. Resume here or choose Continue after returning.':'Local saving is unavailable. Keep this tab open to preserve this run.';
+      const stage=missionStages()[state.missionStage];$('pausedMission').hidden=!stage;$('pausedMission').open=false;
+      if(stage){$('pausedObjective').textContent=state.objective;$('pausedTactic').textContent=missionTactic(stage);}
+      $('resultGrid').classList.add('hidden');$('resultRank')?.classList.remove('show');
+      for(const id of ['shareScoreButton','downloadScoreButton','resultPublishStatus'])$(id)?.classList.add('hidden');
+      $('resumeButton').textContent='Resume';$('quitButton').classList.remove('hidden');
+      $('modalScreen').classList.remove('hidden');$('touchControls').classList.add('hidden');
+      menuFocusIndex=0;requestAnimationFrame(()=>refreshMenuFocus(true));
+    }
+    function resumeGame(){ if(state.mode!=='paused')return;state.mode='playing';startGameplayRadio();$('modalScreen').classList.add('hidden');clearMenuFocus();if(coarsePointer)$('touchControls').classList.remove('hidden');else{pointerWanted=true;requestLock();showMessage('WASD move · click to look');}state.lastTime=performance.now(); }
     function returnToTitle(){
       if(state.mode==='playing'||state.mode==='paused')saveCampaign('active',true);
-      state.mode='menu';document.exitPointerLock?.();
+      state.mode='menu';audio?.stopRadio();liveRadio.stop();updateRadioLabel();document.exitPointerLock?.();
       $('modalScreen').classList.add('hidden');$('hud').classList.add('hidden');$('touchControls').classList.add('hidden');
       $('menuRoot')?.classList.remove('hidden');showMenuScreen('screenMain');
       $('shieldFx').style.opacity='0';$('armorFx').style.opacity='0';$('damageFlash').style.opacity='0';
@@ -921,6 +1062,8 @@ import { AudioSystem } from '/audio.js';
     }
 
     function endGame(victory=false){
+      $('pausedMission').hidden=true;
+      audio?.stopRadio();liveRadio.stop();$('gameRadio').hidden=true;
       audio?.say(victory?'victory':'game-over',true);
       state.mode=victory?'victory':'gameover';player.alive=false;state.finisherCam=null;input.fire=input.shiftFire=input.pointerFire=input.aim=input.jump=false;document.exitPointerLock?.();$('touchControls').classList.add('hidden');updateNightVision();
       const op=currentOp();
@@ -962,29 +1105,36 @@ import { AudioSystem } from '/audio.js';
         if(!rank||!rankEl)return;
         state.lastPartyRank=rank;
         const medal=rank===1?'🥇':rank===2?'🥈':rank===3?'🥉':'◆';
-        rankEl.innerHTML=`PARTY BOARD${rank<=3?' PODIUM':''}<b>${medal} RANK #${rank}</b>${getCallsign()}`;
+        rankEl.replaceChildren();
+        rankEl.append(document.createTextNode(`${state.lastScoreSource||'DEVICE'} BOARD${rank<=3?' PODIUM':''}`));
+        const rankTitle=document.createElement('b');rankTitle.textContent=`${medal} RANK #${rank}`;
+        rankEl.append(rankTitle,document.createTextNode(getCallsign()));
         rankEl.classList.add('show');
         if(shareBtn)shareBtn.dataset.rank=String(rank);
-        if(rank<=3)showMessage(`Podium! Party rank #${rank}`);
+        if(rank<=3)showMessage(`Podium! ${state.lastScoreSource||'Device'} rank #${rank}`);
       });
       menuFocusIndex=0;requestAnimationFrame(()=>refreshMenuFocus(true));
     }
 
     function showComms(speaker,text,duration=4.4){const panel=$('missionComms');panel.querySelector('b').textContent=speaker;panel.querySelector('span').textContent=text;panel.classList.add('show');state.commsTimer=duration;}
 
-    function spawnStorySquad(entries){
+    function spawnStorySquad(entries,incoming=false){
+      let live=state.enemies.filter(e=>!e.dead).length;
       for(const [type,x,y,options] of entries){
-        spawnEnemy(type,[x,y],options||{});
-        if(state.daily?.rules?.stalkerBoost&&type!=='stalker')spawnEnemy('stalker',[x+.45,y-.35],{});
+        if(live>=MAX_LIVE_ENEMIES&&!options?.commander)continue;
+        const point=incoming?reinforcementEntry([[x,y],...DISTRICT_SPAWNS,...spawns],player,state.enemies,(px,py)=>canMove(px,py,.34)&&!carBlocked(px,py,.34),(px,py)=>lineOfSight(player.x,player.y,px,py,player.z)):separatedSpawn([x,y],state.enemies.filter(e=>!e.dead));
+        if(!point)continue;
+        spawnEnemy(type,point,{...options,incoming});live++;
+        if(state.daily?.rules?.stalkerBoost&&type!=='stalker'&&live<MAX_LIVE_ENEMIES){const extra=incoming?reinforcementEntry([[point[0]+3,point[1]-3],...DISTRICT_SPAWNS,...spawns],player,state.enemies,(px,py)=>canMove(px,py,.34)&&!carBlocked(px,py,.34),(px,py)=>lineOfSight(player.x,player.y,px,py,player.z)):separatedSpawn([point[0]+3,point[1]-3],state.enemies.filter(e=>!e.dead));if(extra){spawnEnemy('stalker',extra,{incoming});live++;}}
       }
       state.initialWaveCount=Math.max(1,state.enemies.length);
     }
 
-    function currentOp(){return OPERATIONS[state.operation]||OPERATIONS[0];}
+    function currentOp(){return state.activeOperation||OPERATIONS[state.operation]||OPERATIONS[0];}
     function missionStages(){return currentOp().stages;}
 
     function spawnMissionSquad(def){
-      if(def.squad?.length){spawnStorySquad(def.squad);if(def.type==='hvt')state.commander=state.enemies.find(e=>e.commander)||null;}
+      if(def.squad?.length){spawnStorySquad([...def.squad,...encounterExtras(def.squad)]);if(def.type==='hvt')state.commander=state.enemies.find(e=>e.commander)||null;}
     }
 
     function armDestroyNodes(def){
@@ -1040,10 +1190,11 @@ import { AudioSystem } from '/audio.js';
       if(def.type==='defend'){state.missionHold=def.hold;state.missionSpawnStep=0;}
       if(def.type==='destroy')armDestroyNodes(def);else state.destroyNodes=[];
       showAnnouncement(resumed?'MISSION RESTORED':`OPERATION ${op.name}`,`${MISSION_CONDITIONS[state.timeOfDay].label} // ${def.title}`,2.4);
-      const nvgIntro=opRules().nightVision?' NVG feed is live — green phosphor, stay low.':'';
+      const nvgIntro=state.timeOfDay==='night'?' Night vision is optional: use B or MORE → NVG.':'';
       showComms('Command',(resumed?`Resume phase ${stage+1}: ${def.objective.toLowerCase()}.`:def.comms)+nvgIntro,5.4);
-      if(opRules().nightVision&&!resumed)showMessage('Night vision online');
+      if(state.timeOfDay==='night'&&!resumed)showMessage('NIGHT · NVG OFF · B / MORE → NVG');
       spawnMissionSquad(def);
+      seedSupplies(def);
       updateNightVision();
     }
 
@@ -1055,6 +1206,7 @@ import { AudioSystem } from '/audio.js';
       if(def.type==='destroy')armDestroyNodes(def);else state.destroyNodes=[];
       audio?.wave();audio?.say('breach-inbound');showAnnouncement(def.title,def.objective,2.2);showComms('Command',def.comms,5.2);player.shield=Math.min(player.maxShield,player.shield+12);player.armor=Math.min(player.maxArmor,player.armor+8);player.reserve=Math.min(Math.ceil(weaponConfig().reserve*1.5),player.reserve+Math.ceil(weaponConfig().mag*.6));
       spawnMissionSquad(def);
+      seedSupplies(def);
       maybeStageVehicle(stage);
       saveCampaign('active',true);
     }
@@ -1068,26 +1220,26 @@ import { AudioSystem } from '/audio.js';
         state.missionProgress=Math.max(0,1-dist/(def.range||16));
         if(dist<(def.radius||1.45))advanceMission();
         else if(def.tutorial&&state.tutorialStep<4){
-          if(state.tutorialStep===0&&state.totalTime>3){state.tutorialStep=1;showComms('Hint','WASD move · mouse look · LMB fire.',4.5);}
-          else if(state.tutorialStep===1&&(player.shots>0||state.totalTime>12)){state.tutorialStep=2;showComms('Hint','RMB aim · R reload · 1–4 weapons.',4.5);}
+          if(state.tutorialStep===0&&state.totalTime>3){state.tutorialStep=1;showComms('Hint',state.touch?'Left thumb moves · right thumb looks. Scout the marker and use cover.':'WASD move · mouse look. Scout the marker and use cover.',4.5);}
+          else if(state.tutorialStep===1&&(player.shots>0||state.totalTime>12)){state.tutorialStep=2;showComms('Hint',state.touch?'Aim before firing. Tap AIM and stop moving for tighter shots; Reload behind cover.':'RMB aim · R reload. Stop moving for tighter shots; reload behind cover.',4.5);}
           else if(state.tutorialStep===2&&state.enemies.some(e=>e.dead)){state.tutorialStep=3;showComms('Hint','F for close finishers. Chains raise score.',4);}
           else if(state.tutorialStep===3&&state.takedowns>0){state.tutorialStep=4;showComms('Hint','E enters vehicles near extraction.',4);}
         }
       }else if(def.type==='defend'){
         const holding=dist<(def.radius||2.25);if(holding)state.missionHold=Math.max(0,state.missionHold-dt);state.missionProgress=1-state.missionHold/def.hold;
         const reinforcements=def.reinforcements||[];
-        if(state.missionSpawnStep<reinforcements.length&&state.missionHold<=reinforcements[state.missionSpawnStep].at){spawnStorySquad(reinforcements[state.missionSpawnStep].squad);state.missionSpawnStep++;showComms('Command',`Transfer ${Math.round(state.missionProgress*100)}%. Hostiles inbound.`,3.6);}
+        if(state.missionSpawnStep<reinforcements.length&&state.missionHold<=reinforcements[state.missionSpawnStep].at){const squad=reinforcements[state.missionSpawnStep].squad;spawnStorySquad([...squad,...encounterExtras(squad)],true);state.missionSpawnStep++;showComms('Command',`Transfer ${Math.round(state.missionProgress*100)}%. Reinforcements entering district roads—watch the approaches.`,3.6);}
         if(!holding&&state.missionHold<def.hold-.5&&state.messageTimer<=0)showMessage('Return to the objective zone');if(state.missionHold<=0)advanceMission();
       }else if(def.type==='destroy'){
         const nodes=state.destroyNodes;const live=nodes.filter(n=>!n.dead);const total=Math.max(1,nodes.length);
         state.missionProgress=(total-live.length)/total;
-        const focus=nearestLiveNode();if(focus)state.objectiveTarget=[focus.x,focus.y];
+        const focus=nearestLiveNode();if(focus){state.objectiveTarget[0]=focus.x;state.objectiveTarget[1]=focus.y;}
         if(live.length===0&&nodes.length)advanceMission();
         else if(state.messageTimer<=0&&focus&&Math.hypot(focus.x-player.x,focus.y-player.y)>8)showMessage('LOCATE VAULT RELAYS // FOLLOW THE MARKER');
       }else if(def.type==='hvt'){
         const boss=state.commander&&!state.commander.dead?state.commander:state.enemies.find(e=>e.commander&&!e.dead);
         if(boss){
-          state.commander=boss;state.objectiveTarget=[boss.x,boss.y];state.missionProgress=1-boss.hp/boss.maxHp;
+          state.commander=boss;state.objectiveTarget[0]=boss.x;state.objectiveTarget[1]=boss.y;state.missionProgress=1-boss.hp/boss.maxHp;
           if(boss.cloakTimer>0)boss.cloakTimer=Math.max(0,boss.cloakTimer-dt);
           boss.abilityCooldown=(boss.abilityCooldown||0)-dt;
           // Mid-phase ability pulses after the first escalation.
@@ -1102,7 +1254,7 @@ import { AudioSystem } from '/audio.js';
             const phase=phases[boss.phase];boss.phase++;
             boss.rage=phase.speedMult||boss.rage||1;boss.rageFire=phase.fireMult||boss.rageFire||1;
             boss.suppression=0;boss.reactionTimer=0;if(boss.grounded&&ENEMY_TYPES[boss.type].charge){boss.chargeTimer=.8;boss.chargeCooldown=3;}
-            if(phase.summon?.length)spawnStorySquad(phase.summon);
+            if(phase.summon?.length)spawnStorySquad(phase.summon,true);
             fireBossAbility(boss,phase.ability);
             boss.abilityCooldown=4.5;
             showAnnouncement(phase.announce||'HVT ESCALATION',phase.sub||'HOSTILE REINFORCEMENTS INBOUND',2);
@@ -1112,6 +1264,7 @@ import { AudioSystem } from '/audio.js';
         }
         else if(!state.enemies.some(e=>e.commander&&!e.dead))advanceMission();
       }else if(def.type==='extract'){
+        if(state.cars.every(car=>car.destroyed)){showAnnouncement('EXTRACTION FAILED','ALL VEHICLES DESTROYED · RETRY THE OPERATION',2);endGame(false);return;}
         if(player.carIndex>=0&&!state.extractionArmed){state.extractionArmed=true;state.objective=def.armObjective;state.objectiveTarget=[...def.beacon];showAnnouncement('EXTRACTION ROUTE',def.armAnnounce||'FOLLOW THE BEACON // BOOST AUTHORIZED',1.7);showComms('ARES COMMAND',def.armComms,4.2);}
         const extractionDist=Math.hypot(state.objectiveTarget[0]-player.x,state.objectiveTarget[1]-player.y);state.missionProgress=state.extractionArmed?Math.max(.35,1-extractionDist/15):.18;
         if(state.extractionArmed&&player.carIndex>=0&&extractionDist<1.55){state.wavePhase='complete';state.waveTimer=2.5;state.missionProgress=1;audio?.say('mission-complete');showAnnouncement('MISSION COMPLETE','UNIT 07 // EXTRACTION CONFIRMED',2.4);showComms('ARES COMMAND',currentOp().debriefComms,4.5);}
@@ -1130,22 +1283,31 @@ import { AudioSystem } from '/audio.js';
     }
 
     function spawnEnemy(type,forcedPos=null,options={}){
+      if(!options.commander&&state.enemies.filter(enemy=>!enemy.dead).length>=MAX_LIVE_ENEMIES)return;
       let choices=spawns.map(p=>({p,d:Math.hypot(p[0]-player.x,p[1]-player.y)})).filter(o=>o.d>6).sort((a,b)=>b.d-a.d);
       const pool=choices.slice(0,Math.max(2,Math.ceil(choices.length*.65))); const pos=forcedPos||(pool[(Math.random()*pool.length)|0]||{p:spawns[0]}).p, spec=ENEMY_TYPES[type], diff=DIFFICULTIES[state.difficulty];
       const elite=options.elite??(state.wavePhase!=='mission'&&!state.eliteSpawned&&type===MISSIONS[state.wave-1]?.elite);if(elite){state.eliteSpawned=true;audio?.elite();showMessage(options.commander?'COMMANDER VOSS ENTERED THE GRID':`ELITE ${spec.name} ENTERED THE GRID`);}
       const maxHp=spec.hp*diff.enemyHealth*(elite?1.62:1),x=pos[0]+(forcedPos?0:(Math.random()-.5)*.35),y=pos[1]+(forcedPos?0:(Math.random()-.5)*.35),magazineSize=spec.magazine??12;state.enemies.push({type,variant:(Math.random()*3)|0,x,y,z:GROUND_HEIGHT,vz:0,grounded:true,jumpCooldown:.7+Math.random()*1.4,landingSquash:0,hp:maxHp,maxHp,fireCooldown:1+Math.random(),meleeCooldown:0,path:[],pathTimer:0,anim:Math.random()*TAU,hitFlash:0,dead:false,spawn:1,elite,commander:!!options.commander,dodgeTimer:0,dashCooldown:1.5+Math.random()*2,chargeTimer:0,chargeCooldown:2+Math.random()*2,flank:Math.random()<.5?-1:1,vx:0,vy:0,facing:Math.random()*TAU,awareness:options.commander?1:0,hadSight:false,reactionTimer:options.commander?.18:.45+Math.random()*.45,decisionTimer:.2+Math.random()*.35,combatState:options.commander?'hold':'patrol',lastSeenX:player.x,lastSeenY:player.y,tacticalTarget:null,patrolTarget:null,suppression:0,burstShots:2+((Math.random()*3)|0),magazineSize,rounds:magazineSize,reloadTimer:0,coverTimer:-1,peekTimer:0,searchTimer:.8,searchAngle:Math.random()*TAU,stuckTimer:0,lastMoveX:x,lastMoveY:y,role:options.commander?'assault':spec.role||'assault',phase:0,cloakTimer:0,activeAbility:null,rage:1,rageFire:1});
+      const recruit=state.enemies.at(-1);
+      recruit.perceptionTimer=Math.random()*.1;recruit.canSee=false;
+      recruit.lastSeenX=options.incoming?state.objectiveTarget[0]:x;
+      recruit.lastSeenY=options.incoming?state.objectiveTarget[1]:y;
+      if(options.incoming){recruit.awareness=.42;recruit.combatState='investigate';recruit.tacticalTarget=[recruit.lastSeenX,recruit.lastSeenY];}
     }
 
     function toggleVehicle(){
       if(state.mode!=='playing')return;
+      input.aim=false;$('adsButton').setAttribute('aria-pressed','false');
+      if(nearGunShop()&&nearbyVehicle()<0){openGunShop();return;}
       if(player.carIndex>=0){
         const car=state.cars[player.carIndex],offsets=[Math.PI/2,-Math.PI/2,Math.PI,0];let exit=null;
-        for(const angle of offsets){const x=car.x+Math.cos(car.dir+angle)*1.05,y=car.y+Math.sin(car.dir+angle)*1.05;if(canMove(x,y,.25)&&!carBlocked(x,y,.25,player.carIndex)){exit={x,y};break;}}
-        if(!exit){showMessage('EXIT BLOCKED');return;}player.x=exit.x;player.y=exit.y;player.z=GROUND_HEIGHT;player.carIndex=-1;car.occupied=false;audio?.vehicle();showMessage('EXITED ARES INTERCEPTOR');rumble(.12,.18,60);return;
+        for(const distance of [1.2,1.6,2]){for(const angle of offsets){const x=car.x+Math.cos(car.dir+angle)*distance,y=car.y+Math.sin(car.dir+angle)*distance;if(canMove(x,y,.25)&&!carBlocked(x,y,.25,player.carIndex)){exit={x,y};break;}}if(exit)break;}
+        if(!exit){showMessage('EXIT BLOCKED · MOVE THE VEHICLE INTO OPEN SPACE');return;}player.x=exit.x;player.y=exit.y;player.z=GROUND_HEIGHT;player.carIndex=-1;car.occupied=false;car.speed=0;startGameplayRadio();audio?.vehicle();showMessage(`EXITED ${car.name}`);rumble(.12,.18,60);return;
       }
-      let nearest=-1,best=1.5;for(let i=0;i<state.cars.length;i++){const car=state.cars[i],dist=Math.hypot(car.x-player.x,car.y-player.y);if(!car.destroyed&&!car.occupied&&dist<best){best=dist;nearest=i;}}
-      if(nearest<0){showMessage('MOVE CLOSER TO A VEHICLE');return;}const car=state.cars[nearest];car.occupied=true;player.carIndex=nearest;player.x=car.x;player.y=car.y;player.z=.62;player.vz=0;player.grounded=true;player.dir=car.dir;audio?.vehicle();showMessage('ARES INTERCEPTOR ONLINE // △ TO EXIT');rumble(.16,.25,90);
+      const nearest=nearbyVehicle();
+      if(nearest<0){showMessage('MOVE BESIDE A VEHICLE · E / TRIANGLE / ENTER BUTTON');return;}const car=state.cars[nearest];car.occupied=true;player.carIndex=nearest;player.x=car.x;player.y=car.y;player.z=.62;player.vz=0;player.grounded=true;player.dir=car.dir;startGameplayRadio();$('touchExtras').hidden=true;$('touchMoreButton').setAttribute('aria-expanded','false');audio?.vehicle();showMessage(`${car.name} · E / TRIANGLE EXIT`);rumble(.16,.25,90);
     }
+    function nearbyVehicle(){let nearest=-1,best=1.6;if(Math.abs(player.z-GROUND_HEIGHT)>.85)return -1;for(let i=0;i<state.cars.length;i++){const car=state.cars[i],distance=vehicleDistance(car,player.x,player.y);if(car.destroyed||car.occupied||distance>=best)continue;if(!lineOfSight(player.x,player.y,car.x,car.y,player.z))continue;const mx=(player.x+car.x)/2,my=(player.y+car.y)/2;if(coverAt(mx,my))continue;best=distance;nearest=i;}return nearest;}
 
     function meleeTakedown(){
       if(state.mode!=='playing'||player.carIndex>=0||state.melee>0)return;let target=null,best=1.58;
@@ -1167,51 +1329,48 @@ import { AudioSystem } from '/audio.js';
       try{actuator.playEffect('dual-rumble',{duration,strongMagnitude:strong,weakMagnitude:weak});}catch{}
     }
     function updateGamepad(dt){
-      const pads=navigator.getGamepads?.()||[],pad=Array.from(pads).find(Boolean)||null,status=$('controllerStatus');activeGamepad=pad;
+      const pads=navigator.getGamepads?.()||[],pad=selectConnectedGamepad(pads,activeGamepad?.index),status=$('controllerStatus');if(pad?.index!==activeGamepad?.index)gamepadPrevious=[];activeGamepad=pad;
       status?.classList.toggle('connected',!!pad);if(status)status.textContent=pad?`${/dualsense|wireless controller/i.test(pad.id)?'DUALSENSE':'GAMEPAD'} // ONLINE`:'DUALSENSE // SCANNING';
       if(!pad){controllerAxis={x:0,y:0};input.gamepadFire=input.gamepadAim=input.gamepadJump=input.gamepadSprint=false;input.gamepadAimValue=0;gamepadPrevious=[];return;}
       const down=pad.buttons.map(button=>button.pressed||button.value>.5),pressed=index=>down[index]&&!gamepadPrevious[index];
       // Options: pause / resume only — never skip the menu into a deploy.
       if(pressed(9)){if(state.mode==='playing')pauseGame();else if(state.mode==='paused')resumeGame();}
-      if(pressed(4)&&state.mode==='playing')toggleAutoLock();
+      if(pressed(4)&&state.mode==='playing')toggleAutoLock();if(pressed(17)&&state.mode==='playing')toggleView();if(pressed(8)&&state.mode==='playing')toggleNightVision();
       if(state.mode!=='playing'){
         controllerAxis={x:0,y:0};input.gamepadFire=input.gamepadAim=input.gamepadJump=input.gamepadSprint=false;input.gamepadAimValue=0;
         updateMenuGamepad(pad,down,pressed,dt);
         gamepadPrevious=down;return;
       }
       controllerAxis={x:deadzone(pad.axes[0]||0),y:deadzone(pad.axes[1]||0)+(down[13]?1:0)-(down[12]?1:0)};
-      const sens=lookScale(),lookX=deadzone(pad.axes[2]||0,.12)*sens,lookY=deadzone(pad.axes[3]||0,.12)*sens*pitchSign();if(player.carIndex>=0)state.cars[player.carIndex].dir=normAngle(state.cars[player.carIndex].dir+lookX*1.8*dt);else player.dir=normAngle(player.dir+lookX*2.65*dt);player.pitch=Math.max(-canvas.height*.2,Math.min(canvas.height*.2,player.pitch-lookY*canvas.height*.75*dt));
+      const sens=lookScale(),lookX=deadzone(pad.axes[2]||0,.12)*sens,lookY=deadzone(pad.axes[3]||0,.12)*sens*pitchSign();turnLook(lookX*2.65*dt);player.pitch=Math.max(-canvas.height*.2,Math.min(canvas.height*.2,player.pitch-lookY*canvas.height*.75*dt));
       input.gamepadFire=!!down[7];input.gamepadAimValue=pad.buttons[6]?.value||0;input.gamepadAim=input.gamepadAimValue>.08;input.gamepadJump=!!down[0];input.gamepadSprint=!!down[10];
       if(pressed(0)&&player.carIndex<0)startJump();if(pressed(2))reload();if(pressed(3)||(pressed(1)&&player.carIndex>=0))toggleVehicle();if(pressed(11))meleeTakedown();if(pressed(5)&&player.carIndex<0)cycleWeapon(1);if(pressed(14))cycleWeapon(-1);if(pressed(15))cycleWeapon(1);gamepadPrevious=down;
     }
 
-    function update(dt){
+    let hudRefreshTimer=0,cityTimer=0,cityElapsed=0;
+    function update(dt,uiDt=dt){
       if(state.mode!=='playing')return;
       const realDt=dt;state.totalTime+=realDt;state.slowMo=Math.max(0,state.slowMo-realDt);state.hitStop=Math.max(0,state.hitStop-realDt);
       if(state.finisherCam?.active){state.finisherCam.timer-=realDt;if(state.finisherCam.timer<=0){state.finisherCam=null;document.getElementById('letterboxTop')?.classList.remove('show');document.getElementById('letterboxBottom')?.classList.remove('show');}}
       dt*=state.hitStop>0?.08:state.slowMo>0?.28:1;state.muzzle=Math.max(0,state.muzzle-dt*9);state.melee=Math.max(0,state.melee-dt*3.5);state.screenShake=Math.max(0,state.screenShake-dt*12);state.threatPulse=Math.max(0,state.threatPulse-dt);state.shieldFlash=Math.max(0,state.shieldFlash-dt*4.8);state.armorFlash=Math.max(0,state.armorFlash-dt*3.5);player.hurtTimer=Math.max(0,player.hurtTimer-dt);
       campaignCloud.saveTimer-=realDt;if(campaignCloud.saveTimer<=0){campaignCloud.saveTimer=15;saveCampaign('active');}
-      state.musicTimer-=realDt;if(state.musicTimer<=0){
-        const hostiles=state.enemies.length+state.pending.length;
-        const intensity=Math.min(1,.18+hostiles*.12+(state.wavePhase==='mission'?state.missionProgress*.35:0)+(state.commander?.phase?state.commander.phase*.15:0));
-        audio?.musicBeat(state.musicStep++,intensity,Math.max(1,state.wave+state.missionStage));
-        // Slightly faster pulse when combat is hot.
-        state.musicTimer=intensity>.65?.2:.26;
-      }
-      if(state.announcementTimer>0){state.announcementTimer-=dt;if(state.announcementTimer<=0)$('announcement').classList.remove('show');}
-      if(state.messageTimer>0){state.messageTimer-=dt;if(state.messageTimer<=0)$('message').classList.remove('show');}
-      if(state.commsTimer>0){state.commsTimer-=dt;if(state.commsTimer<=0)$('missionComms').classList.remove('show');}
+      if(state.announcementTimer>0){state.announcementTimer-=uiDt;if(state.announcementTimer<=0)$('announcement').classList.remove('show');}
+      if(state.messageTimer>0){state.messageTimer-=uiDt;if(state.messageTimer<=0)$('message').classList.remove('show');}
+      if(state.commsTimer>0){state.commsTimer-=uiDt;if(state.commsTimer<=0)$('missionComms').classList.remove('show');}
       if(state.wavePhase==='mission')updateMission(dt);
       else if(state.wavePhase==='complete'){state.waveTimer-=dt;if(state.waveTimer<=0)endGame(true);}
       else if(state.wavePhase==='active'){
         if(state.pending.length){state.spawnTimer-=dt;if(state.spawnTimer<=0){spawnEnemy(state.pending.shift());state.spawnTimer=.62;}}
         else if(state.enemies.length===0)completeWave();
       }
-      updatePlayer(dt);updateEnemies(dt);updateProjectiles(dt);updatePickups(dt);updateParticles(dt);updateCorpses(dt);updateHUD();updateNightVision();
+      updatePlayer(dt);updateEnemies(dt);updateProjectiles(dt);updatePickups(dt);updateParticles(dt);updateCorpses(dt);
+      cityTimer-=dt;if(cityTimer<=0){updateCityLife(state.civilians,Math.min(.2,cityElapsed+dt),player,state.muzzle>0,(x,y)=>canMove(x,y,.2)&&!carBlocked(x,y,.2));cityTimer=.1;cityElapsed=0;}else cityElapsed+=dt;
+      hudRefreshTimer-=realDt;
+      if(hudRefreshTimer<=0){hudRefreshTimer=1/20;updateHUD();updateNightVision();}
     }
 
     function updateNightVision(){
-      const active=state.mode==='playing'&&!!opRules().nightVision;
+      const active=state.mode==='playing'&&state.nightVision;
       document.body.classList.toggle('nvg-active',active);
       const badge=$('nvgBadge');if(badge)badge.classList.toggle('show',active);
       const overlay=$('nvgOverlay');if(overlay)overlay.classList.toggle('show',active);
@@ -1247,14 +1406,14 @@ import { AudioSystem } from '/audio.js';
       player.swayX+=(targetSwayX-player.swayX)*Math.min(1,dt*6);
       player.swayY+=(targetSwayY-player.swayY)*Math.min(1,dt*6);
       let f=(input.forward?1:0)-(input.back?1:0)-moveAxis.y-controllerAxis.y, s=(input.right?1:0)-(input.left?1:0)+moveAxis.x+controllerAxis.x;
-      const len=Math.hypot(f,s);if(len>1){f/=len;s/=len;}
+      const len=Math.hypot(f,s);if(len>1&&player.carIndex<0){f/=len;s/=len;}
       player.strafe+=(s-player.strafe)*Math.min(1,dt*8);
       const sprinting=player.carIndex<0&&(input.sprint||input.gamepadSprint)&&f>.25&&!player.reloading&&player.ads<.15;
       if(sprinting)player.sprintLock=.16;
       if(player.carIndex>=0){
-        const car=state.cars[player.carIndex],boosting=(input.jump||input.gamepadJump)&&Math.abs(f)>.2&&car.boost>0,topSpeed=boosting?10.8:7.1,targetSpeed=f*topSpeed;car.boost=Math.max(0,Math.min(100,car.boost+dt*(boosting?-31:16)));car.steer+=(s-car.steer)*Math.min(1,dt*7);car.dir=normAngle(car.dir+s*(boosting?1.35:1.75)*dt*Math.sign(targetSpeed||1));car.speed+=(targetSpeed-car.speed)*Math.min(1,dt*(boosting?4.6:3.2));
-        const nx=car.x+Math.cos(car.dir)*car.speed*dt,ny=car.y+Math.sin(car.dir)*car.speed*dt;if(canMoveVehicle(nx,ny,player.carIndex)){car.x=nx;car.y=ny;}else{const impact=Math.abs(car.speed);car.speed*=-.18;state.screenShake=.65;rumble(.4,.6,85);if(impact>3.8)damageVehicle(car,impact*2.3);}
-        for(const enemy of state.enemies){if(enemy.dead||enemy.spawn>0)continue;const hitDist=Math.hypot(enemy.x-car.x,enemy.y-car.y);if(hitDist<.74&&Math.abs(car.speed)>2.35){const speed=Math.abs(car.speed);enemy.hp-=speed*58;if(enemy.hp<=0){state.roadkills++;audio?.roadkill();killEnemy(enemy,false,'roadkill');player.score+=200;showMessage('VEHICLE TAKEDOWN // +200');rumble(.72,.9,130);}else{enemy.hitFlash=.18;enemy.dodgeTimer=.4;}car.speed*=.78;}}
+        const car=state.cars[player.carIndex],previousDir=car.dir,boosting=updateVehicleHandling(car,f,s,input.jump||input.gamepadJump,input.aim||input.gamepadAim,dt);
+        const previousX=car.x,previousY=car.y,nx=car.x+Math.cos(car.dir)*car.speed*dt,ny=car.y+Math.sin(car.dir)*car.speed*dt;if(canMoveVehicle(nx,ny,player.carIndex)){car.x=nx;car.y=ny;}else{const impact=Math.abs(car.speed);car.dir=previousDir;car.speed=0;state.screenShake=.65;rumble(.4,.6,85);if(impact>3.8)damageVehicle(car,impact*2.3);}
+        for(const enemy of state.enemies){const damage=vehicleImpactDamage(car,previousX,previousY,enemy);if(!damage)continue;enemy.vehicleHitCooldown=.65;enemy.hp-=damage;if(enemy.hp<=0){state.roadkills++;audio?.roadkill();killEnemy(enemy,false,'roadkill');player.score+=200;showMessage('VEHICLE TAKEDOWN // +200');rumble(.72,.9,130);}else{enemy.hitFlash=.18;enemy.dodgeTimer=.4;}car.speed*=.88;}
         car.engineTimer-=dt;if(car.engineTimer<=0&&Math.abs(car.speed)>.35){audio?.engine(car.speed,boosting);car.engineTimer=boosting?.1:.18;}
         player.x=car.x;player.y=car.y;player.dir=car.dir;player.z=.62;player.vz=0;player.grounded=true;player.jetting=false;player.jetFuel=Math.min(100,player.jetFuel+dt*18);
       }else{
@@ -1269,7 +1428,7 @@ import { AudioSystem } from '/audio.js';
         if(canMovePlayer(player.x+dx,player.y,.24))player.x+=dx;else player.moveVx*=.15;
         if(canMovePlayer(player.x,player.y+dy,.24))player.y+=dy;else player.moveVy*=.15;
         const jetBlocked=!!state.daily?.rules?.noJet;
-        player.jetting=!jetBlocked&&(input.jump||input.gamepadJump)&&!player.grounded&&player.jetFuel>0&&player.z<2.45;
+        player.jetting=!jetBlocked&&(input.jump||input.gamepadJump)&&!player.grounded&&player.jetFuel>0&&player.z<3.8;
         if(player.jetting){player.vz=Math.min(3.25,player.vz+11.5*dt);player.jetFuel=Math.max(0,player.jetFuel-29*dt);player.jetSoundTimer-=dt;if(player.jetSoundTimer<=0){audio?.jet();player.jetSoundTimer=.13;}}
         else {player.vz-=8.7*dt;const jetMult=player.jetRecharge||1;player.jetFuel=Math.min(100,player.jetFuel+dt*(player.grounded?22:4)*jetMult);}
         player.z+=player.vz*dt;const floorZ=surfaceHeight(player.x,player.y);
@@ -1326,8 +1485,9 @@ import { AudioSystem } from '/audio.js';
     }
 
     function shoot(){
-      const cfg=weaponConfig();if(player.ammo<=0){player.fireCooldown=.18;audio?.empty();showMessage('MAGAZINE EMPTY // PRESS R OR □');return;}
-      if(state.autoLock&&player.carIndex<0){const directional=selectAutoLockTarget(true);if(directional){state.lockTarget=directional;player.dir=Math.atan2(directional.y-player.y,directional.x-player.x);}}
+      const cfg=weaponConfig();if(player.ammo<=0){player.fireCooldown=.18;audio?.empty();showMessage(state.touch?'Magazine empty · tap Reload':'MAGAZINE EMPTY // PRESS R OR □');return;}
+      const lockEligible=state.autoLock&&(state.familyMode||player.ads>.55);
+      if(lockEligible&&player.carIndex<0){const directional=selectAutoLockTarget(true);if(directional){state.lockTarget=directional;player.dir=Math.atan2(directional.y-player.y,directional.x-player.x);}}
       if(state.daily?.rules?.weaponLock!=null&&player.weaponIndex!==state.daily.rules.weaponLock){equipWeapon(state.daily.rules.weaponLock,true);return;}
       player.ammo--;player.shots++;
       // Patterned recoil: first-shot tight, then climb/yaw per weapon profile.
@@ -1369,14 +1529,16 @@ import { AudioSystem } from '/audio.js';
       const horizon=canvas.height/2+player.pitch-player.recoilKick*canvas.height*.02,diff=DIFFICULTIES[state.difficulty];let registeredHit=false;
       for(let pellet=0;pellet<cfg.pellets;pellet++){
         const baseSpread=(player.spread+cfg.spread*(firstShot?.28:.42))*(1-player.ads*.76)+.0012+Math.abs(player.swayX)*.4;
-        const shotSpread=baseSpread*sprintPenalty;
-        const locked=state.autoLock&&state.lockTarget&&!state.lockTarget.dead;
+        const shotSpread=tacticalShotSpread(baseSpread,Math.hypot(player.moveVx,player.moveVy),player.grounded,player.sprintLock>0);
+        const locked=lockEligible&&state.lockTarget&&!state.lockTarget.dead;
         const baseAngle=locked?Math.atan2(state.lockTarget.y-player.y,state.lockTarget.x-player.x):player.dir;
         const angle=baseAngle+(Math.random()-.5)*shotSpread*(locked?.26:1)+player.swayX*.35;
-        breakGlassInDirection(angle);
-        const ray=castRay(angle,player.x,player.y,40,player.z);let target=null,best=Infinity,critical=false,hitZone='body';
+        const obstruction=castRay(angle,player.x,player.y,40,player.z);
+        const firstCar=vehicleShot(angle,obstruction.dist,horizon);
+        breakGlassInDirection(angle,firstCar?.dist??40);
+        const ray=castRay(angle,player.x,player.y,40,player.z),carHit=vehicleShot(angle,ray.dist,horizon);let target=null,best=Infinity,critical=false,hitZone='body';
         for(const e of state.enemies){
-          if(e.dead)continue;const spec=ENEMY_TYPES[e.type],dx=e.x-player.x,dy=e.y-player.y,dist=Math.hypot(dx,dy),a=Math.abs(normAngle(Math.atan2(dy,dx)-angle));if(dist>ray.dist+.25||a>Math.atan2(spec.radius*(locked&&e===state.lockTarget?1.45:.92),dist))continue;
+          if(e.dead)continue;const spec=ENEMY_TYPES[e.type],dx=e.x-player.x,dy=e.y-player.y,dist=Math.hypot(dx,dy),a=Math.abs(normAngle(Math.atan2(dy,dx)-angle));if(dist>ray.dist+.25||dist>(carHit?.dist??Infinity)||a>Math.atan2(spec.radius*(locked&&e===state.lockTarget?1.45:.92),dist))continue;
           const size=canvas.height/dist*spec.scale,centerY=horizon+(player.z-(e.z||GROUND_HEIGHT))*canvas.height/dist+Math.sin(e.anim)*size*.015,headY=centerY-size*.28,chestY=centerY-size*.08;
           const verticalJitter=(Math.random()-.5)*shotSpread*canvas.height+player.swayY*canvas.height*.5,aimY=canvas.height/2+verticalJitter;
           const bodyHit=locked&&e===state.lockTarget?true:Math.abs(aimY-centerY)<size*.5;
@@ -1401,6 +1563,9 @@ import { AudioSystem } from '/audio.js';
           // Short hit-stop only — keeps pace crisp.
           state.hitStop=Math.max(state.hitStop,critical?.045:.02);
           if(target.hp<=0&&!target.dead){state.hitStop=Math.max(state.hitStop,.055);killEnemy(target,critical,critical?'headshot':'shot');}
+        }else if(carHit){
+          if(!carHit.car.destroyed){damageVehicle(carHit.car,vehicleBallisticDamage(cfg.damage*weaponRangeFalloff(cfg,carHit.dist)*diff.playerDamage),true);spawnHitParticles(player.x+Math.cos(angle)*carHit.dist,player.y+Math.sin(angle)*carHit.dist,'#ffbb55');}
+          if(pellet===0)audio?.impact?.('metal');
         }else if(pellet===0){
           let nodeHit=null,nodeBest=Infinity;
           for(const node of state.destroyNodes){if(node.dead)continue;const dx=node.x-player.x,dy=node.y-player.y,nd=Math.hypot(dx,dy),a=Math.abs(normAngle(Math.atan2(dy,dx)-angle));if(nd<ray.dist+.3&&a<Math.atan2(.55,nd)&&nd<nodeBest){nodeHit=node;nodeBest=nd;}}
@@ -1420,6 +1585,7 @@ import { AudioSystem } from '/audio.js';
 
     function killEnemy(e,critical,method='shot'){
       if(e.dead)return;e.dead=true;const spec=ENEMY_TYPES[e.type];player.kills++;player.combo=Math.min(8,player.combo+1);player.comboTimer=3.2;state.comboPeak=Math.max(state.comboPeak,player.combo);
+      const wallet=readWallet(interfaceStorage,accountUser()?.id);wallet.credits=Math.min(1000000,wallet.credits+20);saveWallet(wallet);
       const methodBonus=method==='takedown'?1.4:method==='roadkill'?1.3:method==='headshot'?1.2:1,eliteBonus=e.elite?1.75:1,gain=Math.round(spec.score*player.combo*(critical?1.25:1)*methodBonus*eliteBonus);player.score+=gain;audio?.kill();$('combo').innerHTML=`<b>x${player.combo} CHAIN</b><small>${e.elite?'ELITE // ':''}${method.toUpperCase()} +${gain}</small>`;$('combo').classList.add('show');
       if(e.commander){const hvt=missionStages().find(s=>s.type==='hvt');audio?.say('hvt-down');showAnnouncement('HVT NEUTRALIZED',`${hvt?.title||'TARGET'} // CONFIRMED`,1.5);showComms('ARES COMMAND',hvt?.confirmComms||'Target confirmed down. Move to your next objective immediately.',4.6);state.screenShake=1;}
       else if(e.elite){showMessage(`ELITE ${spec.name} ELIMINATED`);state.screenShake=Math.max(state.screenShake,.7);}
@@ -1455,10 +1621,10 @@ import { AudioSystem } from '/audio.js';
 
     function openTacticalCell(x,y){return x>1&&y>1&&x<MAP_W-2&&y<MAP_H-2&&map[y][x]===0&&canMove(x+.5,y+.5,.34);}
     function findCoverPoint(e){
-      let best=null,bestScore=Infinity;const radius=e.type==='wraith'?5:4;
+      let best=null,bestScore=Infinity;const radius=e.type==='wraith'?5:4,threatX=e.canSee?player.x:e.lastSeenX,threatY=e.canSee?player.y:e.lastSeenY;
       for(let y=Math.max(1,Math.floor(e.y-radius));y<=Math.min(MAP_H-2,Math.ceil(e.y+radius));y++)for(let x=Math.max(1,Math.floor(e.x-radius));x<=Math.min(MAP_W-2,Math.ceil(e.x+radius));x++){
-        if(!openTacticalCell(x,y))continue;const px=x+.5,py=y+.5,hidden=!lineOfSight(player.x,player.y,px,py,GROUND_HEIGHT),wallNear=isWall(px+.7,py)||isWall(px-.7,py)||isWall(px,py+.7)||isWall(px,py-.7);if(!hidden||!wallNear)continue;
-        const score=Math.hypot(px-e.x,py-e.y)+Math.abs(Math.hypot(px-player.x,py-player.y)-5)*.18;if(score<bestScore){bestScore=score;best=[px,py];}
+        if(!openTacticalCell(x,y))continue;const px=x+.5,py=y+.5,hidden=!lineOfSight(threatX,threatY,px,py,GROUND_HEIGHT),wallNear=isWall(px+.7,py)||isWall(px-.7,py)||isWall(px,py+.7)||isWall(px,py-.7);if(!hidden||!wallNear)continue;
+        const score=Math.hypot(px-e.x,py-e.y)+Math.abs(Math.hypot(px-threatX,py-threatY)-5)*.18;if(score<bestScore){bestScore=score;best=[px,py];}
       }
       return best;
     }
@@ -1466,12 +1632,12 @@ import { AudioSystem } from '/audio.js';
       const side=e.flank,base=Math.atan2(player.y-e.y,player.x-e.x)+side*Math.PI/2;for(const range of [3.8,3,2.2]){const tx=Math.floor(player.x+Math.cos(base)*range),ty=Math.floor(player.y+Math.sin(base)*range);for(let oy=-1;oy<=1;oy++)for(let ox=-1;ox<=1;ox++)if(openTacticalCell(tx+ox,ty+oy))return[tx+ox+.5,ty+oy+.5];}return[player.x,player.y];
     }
     function findPeekPoint(e){
-      const toward=Math.atan2(player.y-e.y,player.x-e.x);for(const direction of [e.flank,-e.flank])for(const distance of [.72,1.02,1.28]){const angle=toward+direction*Math.PI/2,px=e.x+Math.cos(angle)*distance,py=e.y+Math.sin(angle)*distance,ix=Math.floor(px),iy=Math.floor(py);if(openTacticalCell(ix,iy)&&lineOfSight(px,py,player.x,player.y,GROUND_HEIGHT)){e.flank=direction;return[ix+.5,iy+.5];}}return[e.x,e.y];
+      const tx=e.canSee?player.x:e.lastSeenX,ty=e.canSee?player.y:e.lastSeenY,toward=Math.atan2(ty-e.y,tx-e.x);for(const direction of [e.flank,-e.flank])for(const distance of [.72,1.02,1.28]){const angle=toward+direction*Math.PI/2,px=e.x+Math.cos(angle)*distance,py=e.y+Math.sin(angle)*distance,ix=Math.floor(px),iy=Math.floor(py);if(openTacticalCell(ix,iy)&&lineOfSight(px,py,tx,ty,GROUND_HEIGHT)){e.flank=direction;return[ix+.5,iy+.5];}}return[e.x,e.y];
     }
     function findSearchPoint(e){
       e.searchAngle+=e.flank*(.75+Math.random()*.65);for(const radius of [1.2,1.8,2.4]){const x=Math.floor(e.lastSeenX+Math.cos(e.searchAngle)*radius),y=Math.floor(e.lastSeenY+Math.sin(e.searchAngle)*radius);if(openTacticalCell(x,y))return[x+.5,y+.5];}return[e.lastSeenX,e.lastSeenY];
     }
-    function choosePatrolPoint(e){const choices=spawns.filter(point=>Math.hypot(point[0]-e.x,point[1]-e.y)>2.5&&canMove(point[0],point[1],.3));return choices[(Math.random()*choices.length)|0]||[11.5,11.5];}
+    function choosePatrolPoint(e){e.homeX??=e.x;e.homeY??=e.y;const choices=[...spawns,...DISTRICT_SPAWNS].filter(point=>Math.hypot(point[0]-e.homeX,point[1]-e.homeY)<12&&Math.hypot(point[0]-e.x,point[1]-e.y)>2.5&&canMove(point[0],point[1],.3));return choices[(Math.random()*choices.length)|0]||[e.homeX,e.homeY];}
     function moveEnemyAlongPath(e,target,dt,speedScale=1){
       const spec=ENEMY_TYPES[e.type];if(e.pathTimer<=0||!e.path.length){e.path=findPath(e.x,e.y,target[0],target[1]);e.pathTimer=.48+Math.random()*.24;}let mx=0,my=0,p=e.path[0];if(p){const dx=p[0]-e.x,dy=p[1]-e.y,d=Math.hypot(dx,dy);if(d<.22){e.path.shift();p=e.path[0];}else{mx=dx/d;my=dy/d;}}
       return[mx,my,spec.speed*DIFFICULTIES[state.difficulty].enemySpeed*speedScale];
@@ -1483,18 +1649,23 @@ import { AudioSystem } from '/audio.js';
       const sightRange=baseSight;state.squadAlert=Math.max(0,state.squadAlert-dt*(quiet?1.4:1));
       for(const e of state.enemies){
         if(e.dead)continue;const spec=ENEMY_TYPES[e.type],wasReloading=e.reloadTimer>0;e.hitFlash=Math.max(0,e.hitFlash-dt);e.muzzleFlash=Math.max(0,(e.muzzleFlash||0)-dt*10);e.spawn=Math.max(0,e.spawn-dt*2.2);e.fireCooldown-=dt;e.meleeCooldown-=dt;e.pathTimer-=dt;e.dodgeTimer=Math.max(0,e.dodgeTimer-dt);e.dashCooldown-=dt;e.chargeCooldown-=dt;e.chargeTimer=Math.max(0,e.chargeTimer-dt);e.jumpCooldown=Math.max(0,e.jumpCooldown-dt);e.landingSquash=Math.max(0,e.landingSquash-dt*4);e.reactionTimer=Math.max(0,e.reactionTimer-dt);e.decisionTimer-=dt;e.suppression=Math.max(0,e.suppression-dt*.24);e.reloadTimer=Math.max(0,e.reloadTimer-dt);if(wasReloading&&e.reloadTimer<=0){e.rounds=e.magazineSize;e.combatState='engage';e.decisionTimer=0;}
-        const dx=player.x-e.x,dy=player.y-e.y,dist=Math.max(.01,Math.hypot(dx,dy)),canSee=dist<sightRange&&lineOfSight(e.x,e.y,player.x,player.y,Math.max(GROUND_HEIGHT,player.z));
+        e.vehicleHitCooldown=Math.max(0,(e.vehicleHitCooldown||0)-dt);
+        const dx=player.x-e.x,dy=player.y-e.y,dist=Math.max(.01,Math.hypot(dx,dy)),observing=perceptionDue(e,dt);
+        if(observing)e.canSee=dist<sightRange&&enemyPerception(e,dx,dy,dist,!quiet&&(state.muzzle>0||player.carIndex>=0))&&lineOfSight(e.x,e.y,player.x,player.y,Math.max(GROUND_HEIGHT,player.z));
+        const canSee=!!e.canSee;
         if(canSee){
           if(!e.hadSight){e.reactionTimer=.24+Math.random()*(state.timeOfDay==='night'?.5:.32);if(dist<11&&!e.alertSfx){audio?.enemyAlert?.(dist);e.alertSfx=true;}}
-          e.awareness=Math.min(1,e.awareness+dt*(quiet?1.35:2.5));e.lastSeenX=player.x;e.lastSeenY=player.y;e.hadSight=true;
-          for(const ally of state.enemies)if(ally!==e&&!ally.dead&&Math.hypot(ally.x-e.x,ally.y-e.y)<5.5)ally.awareness=Math.max(ally.awareness,.58);
+          e.awareness=Math.min(1,e.awareness+dt*(quiet?1.35:2.5));e.hadSight=true;
+          if(observing){e.lastSeenX=player.x;e.lastSeenY=player.y;for(const ally of state.enemies)if(ally!==e)shareObservation(e,ally);}
         }else{
           e.hadSight=false;e.alertSfx=false;
           e.awareness=Math.max(0,e.awareness-dt*(state.squadAlert>0?.025:(quiet?.12:.08)));
+          if(observing&&(state.muzzle>0||player.carIndex>=0)&&dist<10){e.lastSeenX=Math.round(player.x*2)/2;e.lastSeenY=Math.round(player.y*2)/2;e.awareness=Math.max(e.awareness,.42);}
           if(state.squadAlert>0&&dist<(quiet?7:10))e.awareness=Math.max(e.awareness,.42);
           if(dist<5.5&&e.awareness>.2){e.proxTimer=(e.proxTimer||0)-dt;if(e.proxTimer<=0){audio?.enemyNear?.(dist);e.proxTimer=.55+Math.random()*.45;}}
         }
         const targetDistance=e.tacticalTarget?Math.hypot(e.tacticalTarget[0]-e.x,e.tacticalTarget[1]-e.y):Infinity;
+        if(!canSee&&['advance','flank','engage','hold'].includes(e.combatState)){e.combatState='investigate';e.tacticalTarget=[e.lastSeenX,e.lastSeenY];e.path=[];e.pathTimer=0;}
         if(e.combatState==='cover'&&targetDistance<.48){if(e.coverTimer<0)e.coverTimer=.65+Math.random()*.7;else e.coverTimer-=dt;if(e.coverTimer<=0){e.combatState='peek';e.tacticalTarget=findPeekPoint(e);e.peekTimer=.8+Math.random()*.55;e.path=[];e.pathTimer=0;}}
         else if(e.combatState==='peek'){e.peekTimer-=dt;if(e.peekTimer<=0){e.tacticalTarget=findCoverPoint(e);e.combatState=e.tacticalTarget?'cover':'retreat';e.coverTimer=-1;e.path=[];e.pathTimer=0;}}
         if(e.combatState==='investigate'&&targetDistance<.55){e.searchTimer-=dt;if(e.searchTimer<=0){e.tacticalTarget=findSearchPoint(e);e.searchTimer=.7+Math.random()*.65;e.path=[];e.pathTimer=0;}}
@@ -1511,13 +1682,13 @@ import { AudioSystem } from '/audio.js';
           else if(e.awareness>.18){if(e.combatState!=='investigate')e.tacticalTarget=[e.lastSeenX,e.lastSeenY];else if(targetDistance<.55)e.tacticalTarget=findSearchPoint(e);e.combatState='investigate';}
           else{if(!e.patrolTarget||Math.hypot(e.patrolTarget[0]-e.x,e.patrolTarget[1]-e.y)<.5)e.patrolTarget=choosePatrolPoint(e);e.tacticalTarget=e.patrolTarget;e.combatState='patrol';}
         }
-        let mx=0,my=0;const rage=e.rage||1;let targetSpeed=spec.speed*diff.enemySpeed*.45;
+        let mx=0,my=0;const rage=e.rage||1,threatDx=canSee?dx:e.lastSeenX-e.x,threatDy=canSee?dy:e.lastSeenY-e.y,threatDistance=Math.max(.01,Math.hypot(threatDx,threatDy));let targetSpeed=spec.speed*diff.enemySpeed*.45;
         if(e.reloadTimer<=0&&spec.charge&&canSee&&dist>3.8&&e.chargeCooldown<=0){e.chargeTimer=.68;e.chargeCooldown=4.8+Math.random()*2;audio?.elite();}
         if(e.reloadTimer<=0&&spec.dash&&canSee&&dist>1.7&&dist<7&&e.dashCooldown<=0&&e.suppression<.5){e.dodgeTimer=.42;e.dashCooldown=2.4+Math.random()*2;}
-        if(e.chargeTimer>0){mx=dx/dist;my=dy/dist;targetSpeed=spec.speed*diff.enemySpeed*2.15;}
-        else if(e.dodgeTimer>0){mx=-dy/dist*e.flank;my=dx/dist*e.flank;targetSpeed=spec.speed*diff.enemySpeed*1.6;}
-        else if(e.combatState==='reload'){const target=e.tacticalTarget||findCoverPoint(e);if(target)[mx,my,targetSpeed]=moveEnemyAlongPath(e,target,dt,.72);else{mx=-dx/dist;my=-dy/dist;targetSpeed=spec.speed*diff.enemySpeed*.65;}}
-        else if(e.combatState==='retreat'){mx=-dx/dist;my=-dy/dist;targetSpeed=spec.speed*diff.enemySpeed*.82;}
+        if(e.chargeTimer>0){mx=threatDx/threatDistance;my=threatDy/threatDistance;targetSpeed=spec.speed*diff.enemySpeed*2.15;}
+        else if(e.dodgeTimer>0){mx=-threatDy/threatDistance*e.flank;my=threatDx/threatDistance*e.flank;targetSpeed=spec.speed*diff.enemySpeed*1.6;}
+        else if(e.combatState==='reload'){const target=e.tacticalTarget||findCoverPoint(e);if(target)[mx,my,targetSpeed]=moveEnemyAlongPath(e,target,dt,.72);else{mx=-threatDx/threatDistance;my=-threatDy/threatDistance;targetSpeed=spec.speed*diff.enemySpeed*.65;}}
+        else if(e.combatState==='retreat'){const rx=(canSee?player.x:e.lastSeenX)-e.x,ry=(canSee?player.y:e.lastSeenY)-e.y,rd=Math.max(.01,Math.hypot(rx,ry));mx=-rx/rd;my=-ry/rd;targetSpeed=spec.speed*diff.enemySpeed*.82;}
         else if(['cover','peek','flank','investigate','patrol','advance'].includes(e.combatState)){const target=e.combatState==='advance'?[player.x,player.y]:(e.tacticalTarget||[e.lastSeenX,e.lastSeenY]);[mx,my,targetSpeed]=moveEnemyAlongPath(e,target,dt,e.combatState==='patrol'?.48:e.combatState==='cover'?1.05:e.combatState==='peek'?.66:e.combatState==='flank'?.9:.76);if(e.combatState==='cover'&&targetDistance<.48){mx=0;my=0;targetSpeed=0;}}
         else if(e.combatState==='engage'){const strafe=spec.strafe??.38;mx=-dy/dist*e.flank*strafe;my=dx/dist*e.flank*strafe;targetSpeed=spec.speed*diff.enemySpeed*.72;}
         targetSpeed*=rage;
@@ -1528,8 +1699,8 @@ import { AudioSystem } from '/audio.js';
         const enemyFloor=stairHeight(e.x,e.y)??GROUND_HEIGHT;if(!e.grounded){e.vz-=8.9*dt;e.z+=e.vz*dt;if(e.z<=enemyFloor){e.z=enemyFloor;e.vz=0;e.grounded=true;e.landingSquash=1;}}else e.z+=(enemyFloor-e.z)*Math.min(1,dt*12);
         const movement=Math.hypot(e.vx,e.vy),moved=Math.hypot(e.x-e.lastMoveX,e.y-e.lastMoveY);if(targetSpeed>.25&&moved<.004)e.stuckTimer+=dt;else e.stuckTimer=Math.max(0,e.stuckTimer-dt*2);e.lastMoveX=e.x;e.lastMoveY=e.y;if(e.stuckTimer>.6){if(e.grounded&&e.jumpCooldown<=0){e.vz=4.35;e.grounded=false;e.jumpCooldown=2;}e.stuckTimer=0;e.flank*=-1;e.path=[];e.pathTimer=0;e.decisionTimer=0;e.vx*=.2;e.vy*=.2;}
         const desiredFacing=canSee&&e.combatState!=='retreat'?Math.atan2(dy,dx):movement>.08?Math.atan2(e.vy,e.vx):e.facing,turnDelta=normAngle(desiredFacing-e.facing),turnRate=(spec.turn??4.6)*(e.suppression>.5?.72:1);e.facing=normAngle(e.facing+Math.max(-turnRate*dt,Math.min(turnRate*dt,turnDelta)));e.anim+=dt*(1.4+movement*5.8);
-        if(dist<(spec.meleeRange??.76)&&e.meleeCooldown<=0){damagePlayer(spec.damage*(spec.meleeMult??.7)*diff.enemyDamage);e.meleeCooldown=spec.meleeRate??1.15;state.threatPulse=.35;}
-        else if(canSee&&dist<11&&e.grounded&&e.reactionTimer<=0&&e.reloadTimer<=0&&e.fireCooldown<=0&&e.combatState!=='cover'&&Math.abs(normAngle(Math.atan2(dy,dx)-e.facing))<.18){
+        if(dist<(spec.meleeRange??.76)&&e.meleeCooldown<=0&&lineOfSight(e.x,e.y,player.x,player.y,player.z)){damagePlayer(spec.damage*(spec.meleeMult??.7)*diff.enemyDamage);e.meleeCooldown=spec.meleeRate??1.15;state.threatPulse=.35;}
+        else if(canSee&&dist<11&&e.grounded&&e.reactionTimer<=0&&e.reloadTimer<=0&&e.fireCooldown<=0&&e.combatState!=='cover'&&Math.abs(normAngle(Math.atan2(dy,dx)-e.facing))<.18&&lineOfSight(e.x,e.y,player.x,player.y,Math.max(GROUND_HEIGHT,player.z))){
           const reloadTime=(spec.reloadTime??1.45)+Math.random()*.4;
           if(e.rounds<=0){e.reloadTimer=reloadTime;e.combatState='reload';e.tacticalTarget=findCoverPoint(e);e.path=[];}
           else{enemyShoot(e,dist);e.rounds--;e.burstShots--;if(e.burstShots<=0){e.burstShots=spec.burstFixed||2+((Math.random()*3)|0);e.fireCooldown=.55+Math.random()*.72;}else e.fireCooldown=1/(spec.fireRate*(e.elite?1.25:1)*(e.rageFire||1))*(.64+Math.random()*.22);if(e.rounds<=0){e.reloadTimer=reloadTime;e.combatState='reload';e.tacticalTarget=findCoverPoint(e);e.path=[];}}
@@ -1558,12 +1729,14 @@ import { AudioSystem } from '/audio.js';
         for(let i=0;i<steps&&p.life>0;i++){
           p.x+=p.dx*dt/steps;p.y+=p.dy*dt/steps;p.z+=p.dz*dt/steps;
           const outside=p.x<0||p.y<0||p.x>=MAP_W||p.y>=MAP_H;
+          const ix=Math.floor(p.x),iy=Math.floor(p.y);
+          if(!outside&&map[iy]?.[ix]===4&&p.z<=WALL_HEIGHTS[4]&&!state.brokenGlass.has(glassKey(ix,iy))){shatterGlass(ix,iy);p.life=0;break;}
           if(outside||(p.z<=1&&isWall(p.x,p.y))){
             spawnImpactSparks(p.x,p.y,Math.atan2(p.dy,p.dx));
             if(Math.random()<.4)audio?.ricochet?.(.5);
             p.life=0;break;
           }
-          const car=state.cars.find(vehicle=>!vehicle.destroyed&&Math.hypot(vehicle.x-p.x,vehicle.y-p.y)<.6&&p.z<.95);if(car){damageVehicle(car,p.damage*(car.occupied ? .68 : .9));spawnHitParticles(p.x,p.y,'#ffbb55');p.life=0;break;}
+          const car=state.cars.find(vehicle=>!vehicle.destroyed&&vehicleDistance(vehicle,p.x,p.y)<.06&&p.z>0&&p.z<vehicleBounds(vehicle).height);if(car){damageVehicle(car,vehicleBallisticDamage(p.damage*(car.occupied ? .68 : .9)));spawnHitParticles(p.x,p.y,'#ffbb55');p.life=0;break;}
           const toPlayer=Math.hypot(p.x-player.x,p.y-player.y);
           // Supersonic crack when a round passes close.
           if(!p.flyby&&toPlayer<.55&&toPlayer>.32){p.flyby=true;audio?.flyby?.(toPlayer);}
@@ -1593,22 +1766,43 @@ import { AudioSystem } from '/audio.js';
       player.hurtTimer=.2;state.screenShake=shieldUsed&&!left ? .5 : 1;rumble(shieldUsed&&!left ? .38 : .78,shieldUsed&&!left ? .55 : .92,shieldUsed&&!left?80:120);if(player.health<=0)endGame(false);
     }
 
-    function damageVehicle(car,amount){
+    function damageVehicle(car,amount,playerCredit=false){
       if(car.destroyed)return;car.hp=Math.max(0,car.hp-amount);state.screenShake=Math.max(state.screenShake,.35);if(car.hp>0)return;
-      car.destroyed=true;car.speed=0;spawnDeathParticles(car.x,car.y,'#ff8c57');audio?.roadkill();rumble(1,1,240);
-      if(car.occupied){car.occupied=false;player.carIndex=-1;const ex=car.x+Math.cos(car.dir+Math.PI/2),ey=car.y+Math.sin(car.dir+Math.PI/2);player.x=canMove(ex,ey,.24)?ex:car.x;player.y=canMove(ex,ey,.24)?ey:car.y;player.z=GROUND_HEIGHT;damagePlayer(24);}
-      audio?.say('vehicle-lost');showAnnouncement('VEHICLE LOST','ARES INTERCEPTOR DESTROYED',1.2);
+      car.destroyed=true;car.speed=0;spawnDeathParticles(car.x,car.y,'#ff8c57');audio?.explosion();rumble(1,1,240);
+      for(let n=0;n<18;n++)pushParticle({x:car.x+(Math.random()-.5),y:car.y+(Math.random()-.5)*.7,z:.35,vx:(Math.random()-.5)*4,vy:(Math.random()-.5)*4,vz:1+Math.random()*2.2,gravity:2.5,life:.6+Math.random()*.8,max:1.4,color:n%3===0?'#55534e':n%2?'#ff9a32':'#ffdf87'});
+      if(car.occupied){car.occupied=false;player.carIndex=-1;startGameplayRadio();for(let n=0;n<16;n++){const a=car.dir+n*TAU/16,ex=car.x+Math.cos(a)*1.6,ey=car.y+Math.sin(a)*1.6;if(canMove(ex,ey,.24)&&!carBlocked(ex,ey,.24,car.index)){player.x=ex;player.y=ey;break;}}player.z=GROUND_HEIGHT;}
+      // Mark the wreck first: chain reactions terminate, even with overlapping cars.
+      for(const enemy of state.enemies){if(enemy.dead)continue;const damage=blastDamage(Math.hypot(enemy.x-car.x,enemy.y-car.y));if(damage&&lineOfSight(car.x,car.y,enemy.x,enemy.y)){enemy.hp-=damage;enemy.hitFlash=.2;if(enemy.hp<=0)killEnemy(enemy,false,'explosion');}}
+      for(const other of state.cars){if(other===car||other.destroyed)continue;const damage=blastDamage(Math.hypot(other.x-car.x,other.y-car.y));if(damage&&lineOfSight(car.x,car.y,other.x,other.y))damageVehicle(other,damage,playerCredit);}
+      for(let y=Math.max(0,Math.floor(car.y-4));y<Math.min(MAP_H,car.y+4);y++)for(let x=Math.max(0,Math.floor(car.x-4));x<Math.min(MAP_W,car.x+4);x++){if(map[y][x]!==4||!blastDamage(Math.hypot(x+.5-car.x,y+.5-car.y)))continue;const ray=castRay(Math.atan2(y+.5-car.y,x+.5-car.x),car.x,car.y,4,GROUND_HEIGHT);if(ray.cellX===x&&ray.cellY===y)shatterGlass(x,y);}
+      if(lineOfSight(car.x,car.y,player.x,player.y))damagePlayer(blastDamage(Math.hypot(player.x-car.x,player.y-car.y),3.8,50));
+      showAnnouncement('VEHICLE DESTROYED','KEEP CLEAR OF THE BLAST',1.2);
     }
 
-    function dropPickup(x,y){const needs=player.health<58?'health':player.armor<38?'armor':player.ammo<Math.max(2,weaponConfig().mag*.3)?'ammo':Math.random()<.5?'shield':'ammo';state.pickups.push({kind:needs,x,y,life:15,phase:Math.random()*TAU});}
+    function seedSupplies(stage){
+      for(const [kind,dx,dy,weaponIndex] of [['health',-1,0],['ammo',1,0],['weapon',0,1,state.missionStage%2?5:4]]){
+        const [tx,ty]=stage.target;let spot=null;
+        for(let radius=0;radius<3&&!spot;radius++)for(let oy=-radius;oy<=radius&&!spot;oy++)for(let ox=-radius;ox<=radius;ox++){
+          const x=Math.floor(tx+dx+ox)+.5,y=Math.floor(ty+dy+oy)+.5;
+          if(canMove(x,y,.24)&&Math.hypot(x-player.x,y-player.y)>.9&&!state.pickups.some(p=>Math.hypot(p.x-x,p.y-y)<.5)){spot={x,y};break;}
+        }
+        if(spot&&state.pickups.length<24)state.pickups.push({kind,...spot,weaponIndex,life:3600,phase:0});
+      }
+    }
+    function dropPickup(x,y){const needs=player.health<58?'health':player.armor<38?'armor':player.ammo<Math.max(2,weaponConfig().mag*.3)?'ammo':Math.random()<.5?'shield':'ammo';if(state.pickups.length<24)state.pickups.push({kind:needs,x,y,life:45,phase:Math.random()*TAU});}
     function updatePickups(dt){
-      for(const p of state.pickups){p.life-=dt;p.phase+=dt*2.5;if(Math.hypot(p.x-player.x,p.y-player.y)<.62){
-        if(p.kind==='health'){player.health=Math.min(player.maxHealth,player.health+28);showMessage('+28 VITALS RESTORED');}
-        else if(p.kind==='ammo'){const gain=Math.max(8,Math.ceil(weaponConfig().mag*1.2));player.reserve=Math.min(Math.ceil(weaponConfig().reserve*1.5),player.reserve+gain);showMessage(`+${gain} ${weaponConfig().short} AMMUNITION`);}
-        else if(p.kind==='armor'){player.armor=Math.min(player.maxArmor,player.armor+34);showMessage('+34 CERAMIC ARMOR REPAIRED');}
-        else {player.shield=Math.min(player.maxShield,player.shield+28);player.shieldDelay=0;showMessage('+28 SHIELD CHARGE');}
+      for(const p of state.pickups){p.life-=dt;p.phase+=dt*2.5;if(player.carIndex<0&&player.z<GROUND_HEIGHT+.65&&Math.hypot(p.x-player.x,p.y-player.y)<.62&&lineOfSight(player.x,player.y,p.x,p.y)){
+        let message;
+        if(p.kind==='weapon'){
+          if(state.daily?.rules?.weaponLock!=null)continue;
+          const cfg=WEAPONS[p.weaponIndex];if(!cfg||!weaponUnlocked(p.weaponIndex))continue;
+          equipWeapon(p.weaponIndex,true);player.ammo=cfg.mag;player.reserve=Math.min(Math.ceil(cfg.reserve*1.5),player.reserve+cfg.mag);
+          message=`PICKED UP ${cfg.name} · EQUIPPED`;
+        }else message=collectSupply(player,p.kind,weaponConfig());
+        if(!message)continue;
+        showMessage(message);
         p.life=0;audio?.pickup();$('pickupFlash').style.opacity='.7';setTimeout(()=>$('pickupFlash').style.opacity='0',130);
-      }}state.pickups=state.pickups.filter(p=>p.life>0);
+      }}let count=0;for(const p of state.pickups)if(p.life>0)state.pickups[count++]=p;state.pickups.length=count;
     }
 
     const MAX_PARTICLES=72;
@@ -1668,12 +1862,13 @@ import { AudioSystem } from '/audio.js';
         renderCamera.roll=(player.strafe||0)*.035+(player.recoilYaw||0)*.08;
         return renderCamera;
       }
-      const car=state.cars[player.carIndex];let distance=2.05,cx=car.x-Math.cos(car.dir)*distance,cy=car.y-Math.sin(car.dir)*distance;
-      while(distance>.62&&blocksAt(cx,cy,.94)){distance-=.18;cx=car.x-Math.cos(car.dir)*distance;cy=car.y-Math.sin(car.dir)*distance;}
-      renderCamera.x=cx;renderCamera.y=cy;renderCamera.z=.96;renderCamera.dir=car.dir;renderCamera.pitch=player.pitch*.28-24;renderCamera.roll=0;return renderCamera;
+      const car=state.cars[player.carIndex],bounds=vehicleBounds(car),height=car.kind==='bus'?2:car.kind==='tricycle'?1.25:.96,minDistance=bounds.halfLength+.45;
+      let distance=car.kind==='bus'?4.2:2.55,cx=car.x-Math.cos(car.dir)*distance,cy=car.y-Math.sin(car.dir)*distance;
+      while(distance>minDistance&&blocksAt(cx,cy,height+.72)){distance=Math.max(minDistance,distance-.18);cx=car.x-Math.cos(car.dir)*distance;cy=car.y-Math.sin(car.dir)*distance;}
+      renderCamera.x=cx;renderCamera.y=cy;renderCamera.z=height;renderCamera.dir=car.dir+(car.lookYaw||0);renderCamera.pitch=player.pitch*.28-(car.kind==='bus'?canvas.height*.1:24);renderCamera.roll=0;return renderCamera;
     }
 
-    function viewFov(){return player.carIndex>=0?FOV*1.16:FOV*(1-player.ads*weaponConfig().zoom);}
+    function viewFov(){return player.carIndex>=0?FOV*(1.12+Math.min(.09,Math.abs(state.cars[player.carIndex].speed)*.008)):FOV*(1-player.ads*weaponConfig().zoom);}
 
     function renderSkyline(w,h,horizon){
       ctx.save();ctx.beginPath();ctx.rect(0,0,w,Math.max(0,horizon+2));ctx.clip();
@@ -1785,16 +1980,11 @@ import { AudioSystem } from '/audio.js';
       ctx.restore();
     }
 
+    let radarUpdated=0;
     function drawRadar(){
-      if(state.mode==='menu')return;const w=radar.width,h=radar.height,cx=w/2,cy=h/2,scale=5;
-      rctx.clearRect(0,0,w,h);rctx.save();rctx.beginPath();rctx.arc(cx,cy,w/2-2,0,TAU);rctx.clip();
-      const bg=rctx.createRadialGradient(cx,cy,2,cx,cy,w/2);bg.addColorStop(0,'rgba(19,55,59,.56)');bg.addColorStop(1,'rgba(1,7,10,.92)');rctx.fillStyle=bg;rctx.fillRect(0,0,w,h);
-      rctx.translate(cx,cy);rctx.rotate(-player.dir+Math.PI/2);rctx.translate(-player.x*scale,-player.y*scale);rctx.fillStyle='rgba(49,245,219,.14)';
-      for(let y=0;y<MAP_H;y++)for(let x=0;x<MAP_W;x++)if(map[y][x])rctx.fillRect(x*scale,y*scale,scale,scale);
-      for(const e of state.enemies){if(Math.hypot(e.x-player.x,e.y-player.y)<10){rctx.fillStyle=e.elite?'#fff0a6':ENEMY_TYPES[e.type].color;rctx.beginPath();rctx.arc(e.x*scale,e.y*scale,e.elite?2.8:e.type==='titan'?2.4:1.7,0,TAU);rctx.fill();}}
-      for(const car of state.cars){if(car.destroyed)continue;rctx.fillStyle=car.color;rctx.fillRect(car.x*scale-2.5,car.y*scale-1.5,5,3);}
-      rctx.restore();rctx.save();rctx.translate(cx,cy);rctx.fillStyle='#fff';rctx.shadowColor='#31f5db';rctx.shadowBlur=8;rctx.beginPath();rctx.moveTo(0,-7);rctx.lineTo(5,6);rctx.lineTo(0,3);rctx.lineTo(-5,6);rctx.closePath();rctx.fill();rctx.restore();
-      rctx.strokeStyle='rgba(49,245,219,.4)';rctx.lineWidth=1;rctx.beginPath();rctx.arc(cx,cy,w/2-3,0,TAU);rctx.stroke();
+      if(state.mode==='menu')return;const now=performance.now();if(now-radarUpdated<100)return;radarUpdated=now;
+      const count=String(drawCombatRadar(rctx,map,player,state.enemies));if(radar.dataset.enemies!==count)radar.dataset.enemies=count;
+      if(state.gunShop){rctx.fillStyle='#70e6f0';rctx.fillRect(5+state.gunShop.x*(radar.width-10)/MAP_W-2,5+state.gunShop.y*(radar.height-10)/MAP_H-2,4,4);}
     }
 
     function getAimTarget(limit=.06){let target=null,best=Infinity;for(const enemy of state.enemies){if(enemy.dead||enemy.spawn>0)continue;const dist=Math.hypot(enemy.x-player.x,enemy.y-player.y),angle=Math.abs(normAngle(Math.atan2(enemy.y-player.y,enemy.x-player.x)-player.dir)),score=angle+dist*.0008;if(angle<limit&&score<best&&lineOfSight(player.x,player.y,enemy.x,enemy.y,player.z)){best=score;target={enemy,dist};}}return target;}
@@ -1804,16 +1994,36 @@ import { AudioSystem } from '/audio.js';
       const car=player.carIndex>=0?state.cars[player.carIndex]:null,energy=car?car.boost:player.jetFuel;$('healthBar').style.width=`${player.health}%`;$('shieldBar').style.width=`${player.shield/player.maxShield*100}%`;$('armorBar').style.width=`${player.armor/player.maxArmor*100}%`;$('jetBar').style.width=`${energy}%`;$('healthValue').textContent=String(Math.ceil(player.health)).padStart(3,'0');$('shieldValue').textContent=String(Math.ceil(player.shield)).padStart(3,'0');$('armorValue').textContent=String(Math.ceil(player.armor)).padStart(3,'0');$('energyLabel').textContent=car?'BOOST':'JET';$('jetValue').textContent=String(Math.ceil(energy)).padStart(3,'0');$('shieldFx').style.opacity=String(state.shieldFlash*.9+(player.shield>0 ? .018 : 0));$('armorFx').style.opacity=String(Math.max(state.armorFlash*.42,(1-player.armor/player.maxArmor)*.28));
       document.body.classList.toggle('low-vitals',state.mode==='playing'&&player.health>0&&player.health<35);
       $('ammo').textContent=String(player.ammo).padStart(2,'0');$('reserve').textContent=`/ ${player.reserve}`;$('scoreValue').textContent=String(player.score).padStart(6,'0');$('killCount').textContent=`${String(player.kills).padStart(2,'0')} ELIMINATIONS`;
-      $('weaponName').textContent=car?'ARES INTERCEPTOR // THIRD-PERSON CHASE CAMERA':`${cfg.name} // ${cfg.mode} // AUTO LOCK ${state.autoLock?'ON':'OFF'}`;$('ammoLine').style.opacity=car?'0':'1';$('weaponSlots').style.opacity=car?'0':'1';
+      const weaponText=car?car.name:cfg.name;
+      if($('weaponName').textContent!==weaponText)$('weaponName').textContent=weaponText;
+      const statusText=car?`${Math.round(Math.abs(car.speed)*3.6)} km/h · ${car.braking?'BRAKING':car.speed<-.1?'REVERSE':'DRIVE'} · Hull ${Math.ceil(Math.max(0,car.hp)/car.maxHp*100)}%`:player.reloading?'Reloading…':player.ammo===0?(player.reserve>0?'Empty · reload':'No ammunition · find supplies'):player.health<35?'Low health · find cover':player.ammo<Math.max(2,cfg.mag*.23)?'Low ammunition':cfg.mode;
+      const combatStatus=$('combatStatus');if(combatStatus.textContent!==statusText)combatStatus.textContent=statusText;
+      combatStatus.classList.toggle('warning',!car&&!player.reloading&&(player.ammo===0||player.health<35));
+      $('ammoLine').style.opacity=car?'0':'1';$('weaponSlots').style.opacity=car?'0':'1';
       document.querySelectorAll('.weapon-slot').forEach((slot,index)=>{slot.classList.toggle('active',index===player.weaponIndex);slot.classList.toggle('locked',!weaponUnlocked(index));slot.textContent=`${index+1} ${WEAPONS[index].short}`;});
       const remaining=state.enemies.length+state.pending.length,stages=missionStages(),stage=stages[state.missionStage]||stages[0],objectiveTarget=state.objectiveTarget||stage.target,objectiveDistance=Math.hypot(objectiveTarget[0]-player.x,objectiveTarget[1]-player.y);$('waveLabel').textContent=`PHASE ${String(state.missionStage+1).padStart(2,'0')} / ${String(stages.length).padStart(2,'0')} · ${stage.code}`;$('enemyLabel').textContent=`HOSTILES ${String(remaining).padStart(2,'0')}`;$('missionLabel').textContent=`OBJECTIVE // ${state.objective}`;$('waveFill').style.width=`${Math.max(0,Math.min(100,state.missionProgress*100))}%`;$('objectiveDistance').textContent=stage.type==='defend'?`UPLINK // ${Math.round(state.missionProgress*100)}%`:stage.type==='hvt'&&state.commander?`TARGET // ${Math.ceil(Math.max(0,state.commander.hp))} ARMOR`:`OBJECTIVE // ${Math.ceil(objectiveDistance)}M`;$('objectiveDistance').style.opacity=state.wavePhase==='complete'?'0':'.88';
-      const spread=(38+player.spread*170)*(1-player.ads*.65);$('crosshair').style.width=`${spread}px`;$('crosshair').style.height=`${spread}px`;$('crosshair').style.opacity=car?'0':String(1-player.ads*.82);
+      const directive=missionInstruction(stage,objectiveDistance,state.missionHold,state.destroyNodes.reduce((n,node)=>n+!node.dead,0),!!car);
+      let angle=normAngle(Math.atan2(objectiveTarget[1]-player.y,objectiveTarget[0]-player.x)-player.dir);
+      const direction=Math.abs(angle)<.35?'Ahead':Math.abs(angle)>2.5?'Behind you':angle>0?'Right':'Left';
+      const instruction=$('missionInstruction'),instructionText=`${state.missionStage+1}/${stages.length} · ${directive} · ${direction} · ${Math.ceil(objectiveDistance)}m`;
+      if(instruction.textContent!==instructionText)instruction.textContent=instructionText;
+      let nearby=null,nearDistance=2.5;for(const p of state.pickups){const distance=Math.hypot(p.x-player.x,p.y-player.y);if(distance<nearDistance&&lineOfSight(player.x,player.y,p.x,p.y)){nearby=p;nearDistance=distance;}}
+      const hint=$('supplyHint');hint.hidden=!nearby;
+      if(nearby){const name=nearby.kind==='weapon'?`${WEAPONS[nearby.weaponIndex]?.name} · walk over to equip`:nearby.kind==='health'?(player.health>=player.maxHealth?'Health full · medkit stays here':'Medkit · walk over to restore health'):nearby.kind==='ammo'?'Ammo box · walk over to refill reserve':`${nearby.kind} · walk over to collect`;if(hint.textContent!==name)hint.textContent=name;}
+      const spread=(38+player.spread*170)*tacticalShotSpread(1,Math.hypot(player.moveVx,player.moveVy),player.grounded,player.sprintLock>0)*(1-player.ads*.65);$('crosshair').style.width=`${spread}px`;$('crosshair').style.height=`${spread}px`;$('crosshair').style.opacity=car?'0':String(1-player.ads*.82);
       $('scopeOverlay').style.opacity=car?'0':String(Math.max(0,(player.ads-.38)*1.62));$('zoomReadout').textContent=`${(1/(1-player.ads*cfg.zoom)).toFixed(1)}X ${cfg.short} SMART OPTIC`;
       const assisted=!car&&state.autoLock&&state.lockTarget&&!state.lockTarget.dead,lock=assisted?{enemy:state.lockTarget,dist:Math.hypot(state.lockTarget.x-player.x,state.lockTarget.y-player.y)}:(!car&&player.ads>.35?getAimTarget(.065):null),targetText=lock?`${assisted?'AUTO LOCK // ':''}${lock.enemy.commander?'COMMANDER VOSS':`${lock.enemy.elite?'ELITE ':''}${ENEMY_TYPES[lock.enemy.type].name}`} // ${lock.dist.toFixed(1)}M // ${String(lock.enemy.combatState||'engage').toUpperCase()}`:'NO TARGET LOCK';$('targetReadout').textContent=targetText;$('targetReadout').style.opacity=String(!car&&lock&&(assisted||player.ads>.48) ? .94 : 0);$('targetReadout').style.color=lock?(lock.enemy.elite?'#fff0a6':'var(--cyan)'):'var(--muted)';$('crosshair').classList.toggle('locked',!!assisted);$('lockModeBadge').classList.toggle('active',state.autoLock);$('lockModeBadge').textContent=`AUTO LOCK // ${state.autoLock?'ON':'OFF'} · L1 / T`;$('lockModeBadge').style.opacity=car?'0':'1';
       const nearCar=player.carIndex<0&&state.cars.some(vehicle=>!vehicle.destroyed&&Math.hypot(vehicle.x-player.x,vehicle.y-player.y)<1.5),nearEnemy=player.carIndex<0&&state.enemies.some(enemy=>!enemy.dead&&Math.hypot(enemy.x-player.x,enemy.y-player.y)<1.58),context=car?`CHASE CAMERA // ${Math.ceil(car.hp)}% HULL // ${Math.ceil(car.boost)}% BOOST // △ EXIT`:nearEnemy?'R3 // CINEMATIC FINISHER':nearCar?'△ // ENTER ARES INTERCEPTOR':'';$('vehicleHud').textContent=context;$('vehicleHud').style.opacity=context?'1':'0';
       $('reloadTrack').style.opacity=player.reloading?'1':'0';$('reloadFill').style.width=player.reloading?`${(1-player.reloadTimer/player.reloadTime)*100}%`:'0%';
+      const vehicleIndex=car?player.carIndex:nearbyVehicle(),vehicleButton=$('vehicleButton');
+      const nearbyWreck=vehicleIndex<0&&player.carIndex<0&&state.cars.some(vehicle=>vehicle.destroyed&&vehicleDistance(vehicle,player.x,player.y)<1.6);
+      vehicleButton.hidden=(vehicleIndex<0&&!nearbyWreck&&!nearGunShop())||state.mode!=='playing';vehicleButton.disabled=!!nearbyWreck&&!nearGunShop();
+      if(nearbyWreck)vehicleButton.textContent='Destroyed · find another taxi';
+      if(vehicleIndex>=0){const name=state.cars[vehicleIndex].name,buttonHint=activeGamepad?(/dualsense|wireless controller|054c/i.test(activeGamepad.id)?'△ · ':'Y · '):'';vehicleButton.textContent=`${buttonHint}${car?'Exit':'Enter'} ${name}`;$('vehicleHud').textContent=car?'WASD / LEFT STICK DRIVE · E / TRIANGLE EXIT':`E / TRIANGLE · ENTER ${name}`;$('vehicleHud').style.opacity='1';}
       $('ammo').style.color=player.ammo<Math.max(2,cfg.mag*.23)?'var(--danger)':'var(--ink)';
+      if(nearGunShop()&&vehicleIndex<0)vehicleButton.textContent='Shop · E / Triangle';
       $('adsButton')?.classList.toggle('active',input.aim);$('jetButton')?.classList.toggle('active',player.jetting);
+      $('adsButton').textContent=car?'BRAKE':'AIM';$('adsButton').setAttribute('aria-label',car?'Toggle vehicle brake':'Toggle aim down sights');
     }
 
     function showAnnouncement(title,sub,duration=1.8){const a=$('announcement');a.querySelector('strong').textContent=title;a.querySelector('span').textContent=sub;a.classList.add('show');state.announcementTimer=duration;}
@@ -1821,7 +2031,7 @@ import { AudioSystem } from '/audio.js';
     function showHit(critical){const m=$('hitMarker');m.classList.toggle('critical',critical);m.style.opacity='1';m.style.width=critical?'38px':'30px';m.style.height=critical?'38px':'30px';setTimeout(()=>{m.style.opacity='0';m.style.width='30px';m.style.height='30px';},75);}
 
     function campaignPayload(status='active'){
-      return {id:campaignCloud.id,status,operation:state.operation,difficulty:state.difficulty,time_of_day:state.timeOfDay,wave:Math.max(1,state.wave),score:player.score,kills:player.kills,shots:player.shots,hits:player.hits,takedowns:state.takedowns,roadkills:state.roadkills,health:Math.ceil(player.health),shield:Math.ceil(player.shield),armor:Math.ceil(player.armor),weapon_index:player.weaponIndex,elapsed_seconds:Math.floor(state.totalTime)};
+      return {id:campaignCloud.id,status,arena:state.arenaId,operation:state.operation,difficulty:state.difficulty,time_of_day:state.timeOfDay,wave:Math.max(1,state.wave),score:player.score,kills:player.kills,shots:player.shots,hits:player.hits,takedowns:state.takedowns,roadkills:state.roadkills,health:Math.ceil(player.health),shield:Math.ceil(player.shield),armor:Math.ceil(player.armor),weapon_index:player.weaponIndex,elapsed_seconds:Math.floor(state.totalTime)};
     }
 
     const SYNC_KEY='neon-breach-sync';
@@ -1851,22 +2061,28 @@ import { AudioSystem } from '/audio.js';
     }
 
     async function saveCampaign(status='active',force=false){
+      if(!force&&state.mode!=='playing')return;
+      const payload=campaignPayload(status),localRecord=writeLocalCampaign(status,payload);
+      if(status==='active'){campaignCloud.active=localRecord;campaignCloud.id=localRecord.id;}
+      else campaignCloud.active=null;
+      if($('syncStatus'))$('syncStatus').textContent=localRecord.persisted?'LOCAL WORLD SAVED':'LOCAL SAVE FAILED';
       if(campaignCloud.syncing){if(force||status!=='active')campaignCloud.pendingStatus=status;return;}
-      if(!force&&state.mode!=='playing')return;campaignCloud.syncing=true;if($('syncStatus'))$('syncStatus').textContent='SAVING';
-      const payload=campaignPayload(status);
-      if(campaignCloud.offline){writeLocalCampaign(status,payload);if(status==='active')campaignCloud.active={...payload};else{campaignCloud.records=[{...payload},...campaignCloud.records].slice(0,8);campaignCloud.active=null;}renderCampaignRecords();if($('syncStatus'))$('syncStatus').textContent='LOCAL SAVE';campaignCloud.syncing=false;return;}
+      if(campaignCloud.offline){if(status!=='active')campaignCloud.records=[localRecord,...campaignCloud.records].slice(0,8);renderCampaignRecords();return;}
+      campaignCloud.syncing=true;
       try{
-        const response=await fetch('/api/campaigns',{method:'POST',headers:campaignHeaders({'content-type':'application/json'}),body:JSON.stringify(payload)});
+        const response=await fetch('/api/campaigns',{method:'POST',signal:AbortSignal.timeout(8000),headers:campaignHeaders({'content-type':'application/json'}),body:JSON.stringify(payload)});
         if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`save ${response.status}`);const data=await response.json();if(data.available===false)throw new Error('campaign storage unavailable');if(data.record?.id)campaignCloud.id=Number(data.record.id);if($('syncStatus'))$('syncStatus').textContent='CLOUD SAVED';
         if(status!=='active'){campaignCloud.id=null;await loadCampaignRecords();}
-      }catch{campaignCloud.offline=true;writeLocalCampaign(status,payload);useLocalCampaign();if($('syncStatus'))$('syncStatus').textContent='LOCAL SAVE';}
+      }catch{campaignCloud.offline=true;useLocalCampaign();if($('syncStatus'))$('syncStatus').textContent=campaignCloud.active?'LOCAL WORLD SAVED':'LOCAL SAVE';}
       finally{campaignCloud.syncing=false;const pending=campaignCloud.pendingStatus;campaignCloud.pendingStatus=null;if(pending&&!campaignCloud.offline)saveCampaign(pending,true);}
     }
 
     async function loadCampaignRecords(){
+      // Account-bound local checkpoints cannot be selected before session identity resolves.
+      if(accountCheckPending)await accountInitialization;
       if($('syncStatus'))$('syncStatus').textContent='CONNECTING';
       try{
-        const response=await fetch('/api/campaigns',{headers:campaignHeaders()});if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`load ${response.status}`);const data=await response.json();if(data.available===false)throw new Error('campaign storage unavailable');campaignCloud.offline=false;campaignCloud.records=Array.isArray(data.records)?data.records:[];campaignCloud.active=data.active||null;campaignCloud.remoteBest=Number(data.best_score||0);if(data.career)for(const key of Object.keys(career))career[key]=Number(data.career[key]||0);renderCampaignRecords();renderArsenal();if($('syncStatus'))$('syncStatus').textContent='CLOUD READY';
+        const response=await fetch('/api/campaigns',{signal:AbortSignal.timeout(8000),headers:campaignHeaders()});if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`load ${response.status}`);const data=await response.json();if(data.available===false)throw new Error('campaign storage unavailable');campaignCloud.offline=false;campaignCloud.records=Array.isArray(data.records)?data.records:[];const localActive=localCampaignState()?.active;campaignCloud.active=localActive?.checkpoint&&(!data.active||Date.parse(localActive.updated_at)>=Date.parse(data.active.updated_at||0)||localActive.elapsed_seconds===data.active.elapsed_seconds&&localActive.score===data.active.score)?localActive:data.active||null;campaignCloud.remoteBest=Number(data.best_score||0);if(data.career)for(const key of Object.keys(career))career[key]=Number(data.career[key]||0);renderCampaignRecords();renderArsenal();if($('syncStatus'))$('syncStatus').textContent='CLOUD READY';
       }catch{useLocalCampaign();if($('syncStatus'))$('syncStatus').textContent=campaignCloud.active||campaignCloud.records.length?'LOCAL SAVE':'SAVE UNAVAILABLE';}
       loadLeaderboard();
     }
@@ -1904,8 +2120,13 @@ import { AudioSystem } from '/audio.js';
     const CALLSIGN_KEY='neon-breach-callsign';
     const PARTY_KEY='neon-breach-party';
     let leaderboardOpFilter=null; // null = all operations
+    let leaderboardLoading=false;
+    let leaderboardRevision=0;
+    let lastPublicResult=null;
+    let lastLocalResult=null;
 
     function getCallsign(){
+      if(accountUser())return accountUser().username.toUpperCase();
       try{
         const saved=localStorage.getItem(CALLSIGN_KEY);
         if(saved&&saved.trim().length>=2)return saved.trim().toUpperCase().slice(0,16);
@@ -1956,7 +2177,8 @@ import { AudioSystem } from '/audio.js';
       const board=readLocalBoard();
       const callsign=String(entry.callsign||'OPERATIVE').toUpperCase();
       const operation=Number(entry.operation||0);
-      const idx=board.findIndex(r=>String(r.callsign||'').toUpperCase()===callsign&&Number(r.operation||0)===operation);
+      const day=new Date(entry.at).toISOString().slice(0,10);
+      const idx=board.findIndex(r=>String(r.callsign||'').toUpperCase()===callsign&&Number(r.operation||0)===operation&&(r.difficulty||'operative')===(entry.difficulty||'operative')&&Number.isFinite(Number(r.at))&&new Date(Number(r.at)).toISOString().slice(0,10)===day);
       if(idx>=0){
         if(Number(entry.score)>Number(board[idx].score||0))board[idx]=entry;
       }else board.push(entry);
@@ -2015,19 +2237,29 @@ import { AudioSystem } from '/audio.js';
     }
 
     async function loadLeaderboard(){
+      const revision=++leaderboardRevision;
+      if(leaderboardLoading)return;
+      leaderboardLoading=true;
+      const period=$('rankPeriod')?.value||'all';
+      const difficulty=$('rankDifficulty')?.value||'all';
       const status=$('leaderboardStatus');if(status)status.textContent='LOADING…';
       const party=getPartyCode();
       let local=readLocalBoard();
       if(leaderboardOpFilter!=null)local=local.filter(e=>Number(e.operation||0)===leaderboardOpFilter);
+      if(difficulty!=='all')local=local.filter(e=>e.difficulty===difficulty);
+      if(period!=='all'){
+        const now=new Date(),today=Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate());
+        local=local.filter(e=>Number(e.at)>=today-(period==='weekly'?6:0)*86400000);
+      }
       let remote=[];
       let source='device';
       try{
         const qs=new URLSearchParams();
         if(party)qs.set('party',party);
         if(leaderboardOpFilter!=null)qs.set('operation',String(leaderboardOpFilter));
-        const response=await fetch(`/api/leaderboard?${qs}`,{headers:{accept:'application/json'}});
-        if(response.ok){
-          const data=await response.json();
+        qs.set('period',period);qs.set('difficulty',difficulty);
+        {
+          const data=await fetchJson(`/api/leaderboard?${qs}`);
           if(data.available!==false&&Array.isArray(data.entries)){
             remote=data.entries.map(e=>({
               callsign:e.callsign,
@@ -2046,13 +2278,16 @@ import { AudioSystem } from '/audio.js';
           }
         }
       }catch{}
-      const merged=mergeBoards(remote,local);
+      leaderboardLoading=false;
+      if(revision!==leaderboardRevision){loadLeaderboard();return;}
+      // Never mix unsubmitted device scores into a cloud rank.
+      const merged=source==='device'?local:remote;
       renderLeaderboard(boardToEntries(merged));
       if(status){
         const partyBit=party?`PARTY ${party} · `:'';
-        if(!merged.length)status.textContent=partyBit+'BE THE FIRST';
+        if(!merged.length)status.textContent=partyBit+(source==='device'?'DEVICE ONLY · NO SCORES':'NO SCORES IN THIS FILTER');
         else if(source==='PARTY')status.textContent=`PARTY ${party} · LIVE`;
-        else if(source==='WORLD BOARD')status.textContent='WORLD BOARD · LIVE';
+        else if(source==='WORLD BOARD')status.textContent='WORLD BOARD · UPDATES EVERY 30s';
         else if(source==='PARTY LAN')status.textContent='PARTY LAN · LIVE';
         else if(source==='CLOUD')status.textContent='CLOUD RANKS';
         else status.textContent=`${partyBit}DEVICE · ${merged.length} RUNS`;
@@ -2075,26 +2310,37 @@ import { AudioSystem } from '/audio.js';
         party:party||undefined,
         at:Date.now()
       };
-      if(entry.score<=0)return null;
+      lastPublicResult=null;lastLocalResult=entry;
+      const share=$('shareScoreButton');if(share){delete share.dataset.rank;delete share.dataset.resultUrl;share.textContent='Share local score';}
+      const publishStatus=$('resultPublishStatus');
+      if(publishStatus){publishStatus.classList.remove('hidden');publishStatus.textContent='Saved on this device. Publishing public result…';}
+      $('downloadScoreButton')?.classList.remove('hidden');
       pushLocalBoard(entry);
+      if(entry.score<=0){if(publishStatus)publishStatus.textContent='Saved on this device. Zero-score runs are not submitted to the leaderboard.';return null;}
+      try { lastPublicResult=await publishResult(entry); } catch {}
+      if(share&&lastPublicResult)share.textContent='Share public result';
+      if(publishStatus)publishStatus.textContent=lastPublicResult?'Public result available. Anyone with the link can view it. Updating leaderboard…':'Saved on this device. Public result unavailable; you can still share score text or download a scoreboard.';
       let rank=null;
       try{
-        const response=await fetch('/api/leaderboard',{
+        const data=await fetchJson('/api/leaderboard',{
           method:'POST',
           headers:{'content-type':'application/json',accept:'application/json'},
           body:JSON.stringify(entry)
         });
-        if(response.ok){
-          const data=await response.json();
+        {
           if(Array.isArray(data.entries))renderLeaderboard(boardToEntries(data.entries.map(e=>({
             callsign:e.callsign,score:e.best_score||e.score,kills:e.kills,grade:e.grade,victory:e.victory,difficulty:e.difficulty,operation:e.operation,at:e.at
           }))));
           rank=data.rank||null;
+          state.lastScoreSource=party?'PARTY':data.source==='party'?'LAN':'WORLD';
+          if(publishStatus)publishStatus.textContent=lastPublicResult?'Result published and leaderboard updated. Anyone with the result link can view it.':'Leaderboard updated. Public result link unavailable; share score text or download your scoreboard.';
           if(rank)showMessage(`${party?'PARTY':'BOARD'} RANK #${rank} // ${callsign}`);
           return rank;
         }
       }catch{}
       const local=boardToEntries(readLocalBoard().filter(e=>leaderboardOpFilter==null||Number(e.operation||0)===leaderboardOpFilter));
+      state.lastScoreSource='DEVICE';
+      if(publishStatus)publishStatus.textContent=lastPublicResult?'Public result available. Leaderboard unavailable; the rank below is device-only.':'Saved on this device. Leaderboard and public result unavailable; share score text or download your scoreboard.';
       renderLeaderboard(local);
       const hit=local.find(e=>e.you&&Number(e.best_score)===entry.score);
       rank=hit?.rank||null;
@@ -2117,7 +2363,7 @@ import { AudioSystem } from '/audio.js';
       const list=$('leaderboardRows');if(!list)return;list.replaceChildren();
       if(!entries.length){
         const row=document.createElement('div');row.className='campaign-row';
-        row.innerHTML='<div><b>NO SCORES YET</b><span>Finish a mission to claim the top spot. Invite friends on the same Wi‑Fi.</span></div><strong>—</strong>';
+        row.innerHTML='<div><b>NO SCORES FOR THESE FILTERS</b><span>Change the mission, period, or difficulty filters, or finish a mission. Device-only scores are not public ranks.</span></div><strong>—</strong>';
         list.append(row);return;
       }
       for(const entry of entries.slice(0,15)){
@@ -2136,9 +2382,9 @@ import { AudioSystem } from '/audio.js';
       }
     }
 
-    async function shareText(text,title='NEON BREACH'){
+    async function shareText(text,title='NEON BREACH',url=location.href){
       try{
-        if(navigator.share){await navigator.share({title,text,url:location.href});return true;}
+        if(navigator.share){await navigator.share({title,text,url});return true;}
       }catch{}
       try{
         await navigator.clipboard.writeText(text);
@@ -2162,11 +2408,13 @@ import { AudioSystem } from '/audio.js';
       const kills=btn?.dataset.kills||0;
       const rank=btn?.dataset.rank;
       const callsign=getCallsign();
-      const rankBit=rank?` · party rank #${rank}`:'';
-      shareText(`${callsign} scored ${Number(score).toLocaleString()} on NEON BREACH (grade ${grade}, ${kills} elims${rankBit}).\nCan you beat that?\n${location.href}`);
+      const url=lastPublicResult?resultUrl(lastPublicResult):new URL('/',location.origin).href;
+      const label=lastPublicResult?'Public result (client-reported)':'Device-only result';
+      shareText(`${callsign} scored ${Number(score).toLocaleString()} on NEON BREACH (grade ${grade}, ${kills} elims).\n${label}\nCan you beat that?\n${url}`,'NEON BREACH',url);
     }
 
     function lookScale(){return Math.max(.4,Math.min(1.8,state.lookSens||prefs.lookSens||1));}
+    function turnLook(delta){if(player.carIndex>=0){const car=state.cars[player.carIndex];car.lookYaw=Math.max(-1.1,Math.min(1.1,(car.lookYaw||0)+delta));}else player.dir=normAngle(player.dir+delta);}
     function pitchSign(){return state.invertY||prefs.invertY?-1:1;}
 
     function renderCampaignRecords(){
@@ -2180,8 +2428,10 @@ import { AudioSystem } from '/audio.js';
     function updateBestScore(){const best=Math.max(readBestScore(),campaignCloud.remoteBest||0);$('bestScoreTitle').textContent=`BEST RUN // ${String(best).padStart(6,'0')}`;}
 
     function frame(t){
-      const dt=Math.min(.033,Math.max(0,(t-state.lastTime)/1000||0));state.lastTime=t;
-      updateGamepad(dt);update(dt);
+      if(document.body.classList.contains('multiplayer-active')){if(!frame.multiplayerSuspended){audio?.stopMenuMusic?.();frame.multiplayerSuspended=true;}state.lastTime=t;requestAnimationFrame(frame);return;}
+      if(frame.multiplayerSuspended){frame.multiplayerSuspended=false;if(state.mode==='menu')audio?.startMenuMusic?.();}
+      const elapsed=Math.max(0,(t-state.lastTime)/1000||0),dt=Math.min(.033,elapsed);state.lastTime=t;
+      updateGamepad(dt);update(dt,Math.min(.5,elapsed));
       // Always refresh the shared camera from the live player — when Three.js is
       // active, render() no longer runs every frame, and a stale state.camera
       // freezes the view so the player looks "stuck" even though x/y advance.
@@ -2192,8 +2442,10 @@ import { AudioSystem } from '/audio.js';
     }
 
     function syncFire(){input.fire=input.shiftFire||input.pointerFire;}
+    document.addEventListener('pointerdown',()=>{if(state.mode==='playing'&&audio?.ctx?.state!=='running')audio?.resume();},{capture:true});
     function setKey(code,value){if(code==='KeyW'||code==='ArrowUp')input.forward=value;if(code==='KeyS'||code==='ArrowDown')input.back=value;if(code==='KeyA'||code==='ArrowLeft')input.left=value;if(code==='KeyD'||code==='ArrowRight')input.right=value;if(code==='ShiftLeft'||code==='ShiftRight'){input.shiftFire=value;syncFire();}if(code==='KeyQ')input.sprint=value;if(code==='Space')input.jump=value;}
     addEventListener('keydown',e=>{
+      if(state.mode==='playing'&&audio?.ctx?.state!=='running')audio?.resume();
       if(state.mode==='paused'&&(e.code==='Escape'||e.code==='KeyP')){e.preventDefault();resumeGame();return;}
       if(state.mode==='playing'&&(e.code==='Escape'||e.code==='KeyP')&&!e.repeat){e.preventDefault();pauseGame();return;}
       if(state.mode!=='playing')return;
@@ -2204,18 +2456,22 @@ import { AudioSystem } from '/audio.js';
       if(e.code==='KeyF'&&!e.repeat)meleeTakedown();
       if(e.code==='KeyE'&&!e.repeat)toggleVehicle();
       if(e.code==='KeyT'&&!e.repeat)toggleAutoLock();
-      if(/^Digit[1-4]$/.test(e.code)&&!e.repeat)equipWeapon(Number(e.code.slice(-1))-1);
+      if(e.code==='KeyB'&&!e.repeat)toggleNightVision();if(e.code==='KeyV'&&!e.repeat)toggleView();
+      if(/^Digit[1-6]$/.test(e.code)&&!e.repeat)equipWeapon(Number(e.code.slice(-1))-1);
       if(e.code==='KeyM'&&!e.repeat)toggleAudio();
+      if(e.code==='KeyN'&&!e.repeat&&!e.target.closest?.('input,select,textarea'))cycleRadioStation(1);
     });
     addEventListener('keyup',e=>setKey(e.code,false));
     // Only clear keys on real window blur — never auto-pause (that trapped players).
     addEventListener('blur',()=>{Object.keys(input).forEach(k=>{if(typeof input[k]==='boolean')input[k]=false;});input.gamepadAimValue=0;moveAxis={x:0,y:0};});
     addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(resize,80);});
+    matchMedia('(orientation:portrait)').addEventListener('change',()=>{resetTouchInputs();resize();});
+    document.addEventListener('fullscreenchange',()=>{resetTouchInputs();resize();const button=$('screenModeButton');if(button){button.textContent=document.fullscreenElement?'EXIT':'SCREEN';button.setAttribute('aria-label',document.fullscreenElement?'Exit fullscreen and unlock orientation':'Try landscape fullscreen');}});
     document.addEventListener('mousemove',e=>{
       if(state.mode!=='playing'||coarsePointer)return;
       if(document.pointerLockElement===canvas){
         const sens=lookScale(),inv=pitchSign();
-        player.dir=normAngle(player.dir+e.movementX*.00225*sens);
+        turnLook(e.movementX*.00225*sens);
         player.pitch=Math.max(-canvas.height*.2,Math.min(canvas.height*.2,player.pitch-e.movementY*.32*sens*inv));
         return;
       }
@@ -2224,12 +2480,14 @@ import { AudioSystem } from '/audio.js';
         const mx=e.movementX||(freeLookLast?e.clientX-freeLookLast.x:0),my=e.movementY||(freeLookLast?e.clientY-freeLookLast.y:0);
         freeLookLast={x:e.clientX,y:e.clientY};
         const sens=lookScale(),inv=pitchSign();
-        player.dir=normAngle(player.dir+mx*.0045*sens);
+        turnLook(mx*.0045*sens);
         player.pitch=Math.max(-canvas.height*.2,Math.min(canvas.height*.2,player.pitch-my*.65*sens*inv));
       }
     });
     document.addEventListener('mousedown',e=>{
       if(state.mode!=='playing')return;
+      audio?.resume();
+      if(e.target.closest?.('button,select,input,a'))return;
       if(e.button===0){
         if(!coarsePointer&&document.pointerLockElement!==canvas){requestLock();showMessage('MOUSE LOOK CAPTURED // ESC RELEASES LOOK ONLY');}
         else{input.pointerFire=true;syncFire();}
@@ -2247,13 +2505,14 @@ import { AudioSystem } from '/audio.js';
         showMessage('MOUSE LOOK RELEASED // CLICK VIEW TO RECAPTURE · WASD STILL MOVES');
       }
     });
-    document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.mode==='playing')saveCampaign('active',true);});
+    document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.mode==='playing')pauseGame();});
+    addEventListener('pagehide',()=>{if(state.mode==='playing'||state.mode==='paused')saveCampaign('active',true);});
     canvas.addEventListener('contextmenu',e=>e.preventDefault());
     // Invisible hit target stays above the Three canvas so clicks always recapture look.
     canvas.style.pointerEvents='auto';
     canvas.style.zIndex='2';
 
-    document.querySelectorAll('[data-difficulty]').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('[data-difficulty]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');state.difficulty=btn.dataset.difficulty;}));
+    document.querySelectorAll('[data-difficulty]').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('[data-difficulty]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');state.difficulty=btn.dataset.difficulty;updateMissionOptionsSummary();}));
     document.querySelectorAll('[data-time]').forEach(btn=>btn.addEventListener('click',()=>setMissionTime(btn.dataset.time)));
     // Operation cards for the ops screen.
     OPERATIONS.forEach((op,index)=>{
@@ -2287,6 +2546,7 @@ import { AudioSystem } from '/audio.js';
       const base=Math.max(0.0001,state.masterVolume??window.__NEON_VOLUME__??.28);
       if(audio?.setMuted)audio.setMuted(state.muted);
       else if(audio?.master)audio.master.gain.value=state.muted?0:base;
+      liveRadio.setVolume(radioVolume*(state.masterVolume??.28),state.muted);updateRadioLabel();
       if(!state.muted){
         if(state.mode==='menu')audio?.startMenuMusic?.();
         showMessage?.(state.mode==='menu'||state.mode==='paused'?`Audio on · ${Math.round((state.masterVolume||.28)*100)}%`:'Audio on');
@@ -2296,15 +2556,19 @@ import { AudioSystem } from '/audio.js';
 
     function setupTouch(){
       if(!coarsePointer)return;const joy=$('joystickZone'),knob=$('joystickKnob'),look=$('lookZone');let joyId=null,lookId=null,lastLook={x:0,y:0};
+      $('objectiveBox').appendChild($('missionComms'));
+      resetTouchInputs=()=>{joyId=lookId=null;lastLook={x:0,y:0};moveAxis={x:0,y:0};input.pointerFire=input.sprint=input.jump=false;syncFire();knob.style.transform='translate(0,0)';};
       joy.addEventListener('pointerdown',e=>{joyId=e.pointerId;joy.setPointerCapture(e.pointerId);updateJoy(e);});
       joy.addEventListener('pointermove',e=>{if(e.pointerId===joyId)updateJoy(e);});
       const endJoy=e=>{if(e.pointerId===joyId){joyId=null;moveAxis={x:0,y:0};knob.style.transform='translate(0,0)';}};joy.addEventListener('pointerup',endJoy);joy.addEventListener('pointercancel',endJoy);
       function updateJoy(e){const r=joy.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,dx=e.clientX-cx,dy=e.clientY-cy,len=Math.hypot(dx,dy),max=42,k=Math.min(1,max/Math.max(max,len));moveAxis={x:dx/max*k,y:dy/max*k};knob.style.transform=`translate(${dx*k}px,${dy*k}px)`;}
       look.addEventListener('pointerdown',e=>{lookId=e.pointerId;lastLook={x:e.clientX,y:e.clientY};look.setPointerCapture(e.pointerId);});
-      look.addEventListener('pointermove',e=>{if(e.pointerId!==lookId||state.mode!=='playing')return;const dx=e.clientX-lastLook.x,dy=e.clientY-lastLook.y;lastLook={x:e.clientX,y:e.clientY};const sens=lookScale(),inv=pitchSign();player.dir=normAngle(player.dir+dx*.006*sens);player.pitch=Math.max(-canvas.height*.2,Math.min(canvas.height*.2,player.pitch-dy*.85*sens*inv));});
+      look.addEventListener('pointermove',e=>{if(e.pointerId!==lookId||state.mode!=='playing')return;const dx=e.clientX-lastLook.x,dy=e.clientY-lastLook.y;lastLook={x:e.clientX,y:e.clientY};const sens=lookScale(),inv=pitchSign();turnLook(dx*.006*sens);player.pitch=Math.max(-canvas.height*.2,Math.min(canvas.height*.2,player.pitch-dy*.85*sens*inv));});
       const endLook=e=>{if(e.pointerId===lookId)lookId=null;};look.addEventListener('pointerup',endLook);look.addEventListener('pointercancel',endLook);
       const fire=$('fireButton');fire.addEventListener('pointerdown',e=>{e.preventDefault();input.pointerFire=true;syncFire();fire.setPointerCapture(e.pointerId);});fire.addEventListener('pointerup',()=>{input.pointerFire=false;syncFire();});fire.addEventListener('pointercancel',()=>{input.pointerFire=false;syncFire();});
       $('reloadButton').addEventListener('pointerdown',e=>{e.preventDefault();reload();});
+      $('weaponButton').addEventListener('pointerdown',e=>{e.preventDefault();cycleWeapon(1);});
+      $('meleeButton').addEventListener('pointerdown',e=>{e.preventDefault();meleeTakedown();});
       const sprint=$('sprintButton');sprint.addEventListener('pointerdown',e=>{input.sprint=true;sprint.setPointerCapture(e.pointerId);});sprint.addEventListener('pointerup',()=>input.sprint=false);sprint.addEventListener('pointercancel',()=>input.sprint=false);
       const jet=$('jetButton');jet.addEventListener('pointerdown',e=>{e.preventDefault();input.jump=true;startJump();jet.setPointerCapture(e.pointerId);});jet.addEventListener('pointerup',()=>input.jump=false);jet.addEventListener('pointercancel',()=>input.jump=false);
       const ads=$('adsButton');ads.addEventListener('pointerdown',e=>{e.preventDefault();input.aim=!input.aim;ads.setAttribute('aria-pressed',String(input.aim));});
@@ -2319,27 +2583,57 @@ import { AudioSystem } from '/audio.js';
         teleport:(x=player.x,y=player.y)=>{player.x=Number(x);player.y=Number(y);player.z=surfaceHeight(player.x,player.y);},
         skipWait:()=>{state.waveTimer=0;state.spawnTimer=0},
         setInvulnerable:(value=true)=>{state.qaInvulnerable=!!value;},
+        tacticalProbe:()=>{
+          const savedPlayer={...player},savedEnemies=state.enemies,savedProjectiles=state.projectiles,savedAlert=state.squadAlert,savedInitial=state.initialWaveCount;
+          try{
+            state.enemies=[];state.projectiles=[];state.squadAlert=0;
+            Object.assign(player,{x:12,y:36,z:GROUND_HEIGHT,carIndex:-1,dir:0});
+            spawnEnemy('wraith',[8,36]);const guard=state.enemies[0];
+            Object.assign(guard,{facing:0,perceptionTimer:0,decisionTimer:99,fireCooldown:99,combatState:'advance'});
+            updateEnemies(.1);const observed=guard.canSee&&guard.lastSeenX===12&&guard.lastSeenY===36;
+            player.x=36;guard.combatState='advance';updateEnemies(.11);
+            const searchesLastKnown=!guard.canSee&&guard.combatState==='investigate'&&guard.lastSeenX===12&&guard.tacticalTarget[0]===12;
+            state.enemies=[];player.x=12;
+            spawnStorySquad([['wraith',12,36],['specter',12,36]],true);
+            const safeEntries=state.enemies.length>0&&state.enemies.every(e=>Math.hypot(e.x-player.x,e.y-player.y)>=8&&canMove(e.x,e.y,.34)&&(!lineOfSight(player.x,player.y,e.x,e.y,player.z)||Math.cos(player.dir)*(e.x-player.x)+Math.sin(player.dir)*(e.y-player.y)<=Math.hypot(e.x-player.x,e.y-player.y)*.5));
+            return {observed,searchesLastKnown,safeEntries,count:state.enemies.length};
+          }finally{Object.assign(player,savedPlayer);state.enemies=savedEnemies;state.projectiles=savedProjectiles;state.squadAlert=savedAlert;state.initialWaveCount=savedInitial;}
+        },
         setAim:(value=true)=>{input.aim=!!value;},
         setAutoLock:(value=true)=>setAutoLock(!!value,false,false),
         setMissionStage:(stage=0)=>setMissionStage(Math.max(0,Math.min(missionStages().length-1,stage|0))),
         setOperation:(index=0)=>{if(state.mode==='menu')setOperation(index,false);},
+        setLandingTest:(x,y)=>{player.x=x;player.y=y;player.z=surfaceHeight(x,y)+.7;player.vz=-1;player.grounded=false;input.jump=false;player.moveVx=player.moveVy=0;return surfaceHeight(x,y);},
+        besideVehicle:(index=0)=>{const car=state.cars[index];for(const offset of [Math.PI/2,-Math.PI/2,0,Math.PI]){const x=car.x+Math.cos(car.dir+offset)*1.5,y=car.y+Math.sin(car.dir+offset)*1.5;if(canMove(x,y,.24)&&!carBlocked(x,y,.24)){player.x=x;player.y=y;player.z=GROUND_HEIGHT;player.grounded=true;player.vz=0;player.moveVx=player.moveVy=0;return true;}}return false;},
+        radioStatus:()=>({...liveRadio.status(),station:radioStation,volume:radioVolume,muted:state.muted,vehicle:state.cars[player.carIndex]?.kind||null,synthSteps:audio?.radioStep||0}),
+        vehicleCamera:()=>{const cam=getRenderCamera(),car=state.cars[player.carIndex];return car?{clearance:vehicleDistance(car,cam.x,cam.y),eyeHeight:cam.z+.72,roofHeight:vehicleBounds(car).height}:null;},
+        touchInput:()=>({x:moveAxis.x,y:moveAxis.y,fire:input.pointerFire,aim:input.aim,sprint:input.sprint,jump:input.jump}),
+        worldSnapshot:()=>({arena:state.arenaId,layoutVersion:state.layoutVersion,cells:map.map(row=>row.slice()),cars:state.cars.map(c=>({kind:c.kind,color:c.color,name:c.name,x:c.x,y:c.y,hp:c.hp,destroyed:!!c.destroyed}))}),
+        prepareDestructionTest:()=>{state.enemies=[];state.projectiles=[];player.carIndex=-1;for(const car of state.cars)car.occupied=false;const car=state.cars[6];car.x=12;car.y=36;car.dir=0;car.hp=car.maxHp=vehicleIntegrity(car.kind);car.destroyed=false;Object.assign(player,{x:8,y:36,z:GROUND_HEIGHT,dir:0,pitch:0,recoil:0,recoilKick:0,recoilYaw:0,swayX:0,swayY:0,fireCooldown:0});setAutoLock(false,false,false);equipWeapon(0,true);},
+        fireTestRound:()=>{player.ammo=Math.max(1,player.ammo);player.recoil=player.recoilKick=player.recoilYaw=player.pitch=player.swayX=player.swayY=0;player.dir=0;shoot();},
+        checkpointInfo:()=>captureCheckpoint(state,player,accountUser()?.id),
+        resumeInfo:()=>state.qaResumeInfo,
+        prepareCheckpointTest:()=>{state.enemies=[];beginOperation(2);state.missionHold=13.25;state.missionSpawnStep=1;state.totalTime=41.5;player.ammo=7;player.reserve=66;player.health=63;for(const car of state.cars)car.occupied=false;player.carIndex=5;const car=state.cars[5];car.occupied=true;car.speed=0;car.hp=230;player.x=car.x;player.y=car.y;player.z=.62;state.brokenGlass.add(glassKey(5,3));if(state.enemies[0])state.enemies[0].hp=34;pauseGame();},
+        prepareGlassTest:()=>{state.enemies=[];state.projectiles=[];for(const car of state.cars)car.occupied=false;Object.assign(player,{carIndex:-1,x:5.5,y:1.7,z:GROUND_HEIGHT,dir:Math.PI/2,pitch:0,recoil:0,recoilKick:0,recoilYaw:0,swayX:0,swayY:0,fireCooldown:0});setAutoLock(false,false,false);equipWeapon(0,true);player.ammo=weaponConfig().mag;player.reserve=weaponConfig().reserve;player.fireCooldown=0;player.reloading=false;player.reloadTimer=0;},
         damageCommander:(fraction=.4)=>{const boss=state.enemies.find(e=>e.commander&&!e.dead);if(boss)boss.hp=Math.max(1,boss.hp-boss.maxHp*fraction);},
         setFlight:(value=true)=>{if(value)startJump();input.jump=!!value;},
         equipWeapon:(index=0)=>equipWeapon(index),
+        supplyTest:(kind='health')=>{player.health=50;player.reserve=0;state.pickups.push({kind,x:player.x,y:player.y,weaponIndex:5,life:30,phase:0});updatePickups(.01);return {health:player.health,reserve:player.reserve,weapon:weaponConfig().id};},
         melee:()=>meleeTakedown(),
         damageNearestRelay:(amount=40)=>{const node=nearestLiveNode();if(node)damageDestroyNode(node,amount);return !!node;},
         triggerBossPhase:()=>{const boss=state.enemies.find(e=>e.commander&&!e.dead);if(!boss)return false;const def=missionStages()[state.missionStage];const phases=def?.boss?.phases||[];if(boss.phase>=phases.length)return false;boss.hp=Math.max(1,boss.maxHp*phases[boss.phase].at-1);return true;}
       };
     }
     window.__NEON_3D__={
-      world:{map,WALL_HEIGHTS,GROUND_HEIGHT,MAP_W,MAP_H,STAIR_ZONES,enemyTypes:ENEMY_TYPES,weapons:WEAPONS},
+      world:{map,WALL_HEIGHTS,GROUND_HEIGHT,MAP_W,MAP_H,STAIR_ZONES,covers:WORLD_COVERS,coverLayouts:ARENA_COVERS,arenas:ARENAS,enemyTypes:ENEMY_TYPES,weapons:WEAPONS},
       frame:()=>{
         // Never reuse a stale camera snapshot — always recompute from player.
         threeFrame.mode=state.mode;threeFrame.timeOfDay=state.timeOfDay;threeFrame.totalTime=state.totalTime;
         threeFrame.camera=getRenderCamera();state.camera=threeFrame.camera;
         threeFrame.player=player;threeFrame.enemies=state.enemies;threeFrame.cars=state.cars;threeFrame.corpses=state.corpses;threeFrame.bloodDecals=state.bloodDecals;threeFrame.brokenGlass=state.brokenGlass;threeFrame.projectiles=state.projectiles;threeFrame.pickups=state.pickups;threeFrame.particles=state.particles;threeFrame.muzzle=state.muzzle;threeFrame.melee=state.melee;threeFrame.screenShake=state.screenShake;threeFrame.fov=viewFov();threeFrame.missionStage=state.missionStage;threeFrame.missionProgress=state.missionProgress;threeFrame.objectiveTarget=state.objectiveTarget;threeFrame.wavePhase=state.wavePhase;threeFrame.gore=state.gore;threeFrame.commander=state.commander;threeFrame.destroyNodes=state.destroyNodes;threeFrame.finisherCam=state.finisherCam;
         threeFrame.opId=currentOp()?.id||null;
-        threeFrame.nightVision=!!(state.mode==='playing'&&opRules().nightVision);
+        threeFrame.arenaId=state.arenaId;threeFrame.layoutVersion=state.layoutVersion;
+        threeFrame.nightVision=state.mode==='playing'&&state.nightVision;threeFrame.viewMode=state.viewMode;threeFrame.civilians=state.civilians;threeFrame.gunShop=state.gunShop;
         return threeFrame;
       },
       ready:(options={})=>{state.threeReady=!options.fallback;if(state.threeReady)document.body.classList.add('three-ready');else document.body.classList.add('three-fallback');},
@@ -2359,4 +2653,7 @@ import { AudioSystem } from '/audio.js';
       else setPartyCode(getPartyCode());
     }catch{setPartyCode(getPartyCode());}
     getSyncCode();
+    for(const id of ['rankPeriod','rankDifficulty'])$(id)?.addEventListener('change',()=>loadLeaderboard());
+    $('downloadScoreButton')?.addEventListener('click',()=>{if(lastPublicResult||lastLocalResult)downloadScorecard(lastPublicResult||lastLocalResult);});
+    const accountInitialization=initializeAccounts(user=>{if(user){$('settingCallsign').value=user.username;startCommunity(loadLeaderboard);if(!accountCheckPending)loadCampaignRecords();}else if(state.mode==='playing')pauseGame();}).finally(()=>{accountCheckPending=false;});
     setMissionTime(preferredTime,false);setAutoLock(preferredAutoLock,false,false);setGore(preferredGore,false);setOperation(preferredOperation,false);renderArsenal();renderDailyPanel();updateBestScore();loadCampaignRecords();initAssets();resize();setupTouch();render();runBootSplash();armMenuMusicOnGesture();sendTelemetry('loaded');requestAnimationFrame(frame);

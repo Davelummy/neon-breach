@@ -32,6 +32,7 @@ export function campaignValues(payload) {
     status: cleanChoice(payload.status, ['active', 'victory', 'failed', 'abandoned'], 'active'),
     // Loose upper bound so new operations don't need a worker redeploy; the client clamps to real ops.
     operation: cleanInteger(payload.operation, 0, 0, 7),
+    arena:cleanChoice(payload.arena,['city-gate','millennium-park','jabi-lake'],'city-gate'),
     difficulty: cleanChoice(payload.difficulty, ['recruit', 'operative', 'nightmare'], 'operative'),
     timeOfDay: cleanChoice(payload.time_of_day, ['day', 'night'], 'day'),
     wave: cleanInteger(payload.wave, 1, 1, 5),
@@ -137,6 +138,7 @@ export function applyCampaignWrite(profile, payload = {}) {
     id,
     status: values.status,
     operation: values.operation,
+    arena:values.arena,
     difficulty: values.difficulty,
     time_of_day: values.timeOfDay,
     wave: values.wave,

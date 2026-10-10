@@ -19,6 +19,12 @@ npm run dev
 # open the Network URL printed in the terminal for same-Wi‑Fi play
 ```
 
+## Multiplayer foundation — online free-for-all target
+
+Run `PORT=4176 npm run dev`, open the main game, sign in and select **Multiplayer · Create / join room**. Create a private day/night room and share its code/invite. The free-for-all supports 2–8 players, campaign-paced walking and sprinting, shared taxis/kekes/buses, server-owned hits/kills, timed respawns and rotating arenas. Options/Escape opens the match menu and stops your inputs; the live match continues. Keyboard, touch and simulated standard-controller controls are covered by browser tests. Use throwaway passwords over local HTTP.
+
+The delivery target is internet play across networks, but deployment is explicitly deferred: the current preview still needs both players to reach the development server. Rooms/results are memory-only. Static Netlify hosting alone does not run the match service, and this mode is not public-launch or load-certified. See [scope and verification](docs/private-multiplayer-prototype.md) and [internet deployment gates](docs/online-multiplayer-deployment.md). Run `npm run qa:multiplayer` for the main-menu, movement and two-browser combat test.
+
 ## Campaign operations
 
 Pick an operation from the mission command panel. Each runs five phases and ends in a vehicle extraction.

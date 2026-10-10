@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Emulator baseline: no client data access until authenticated access tests exist.
+    // Server SDK authorization must be tested separately because Admin bypasses rules.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

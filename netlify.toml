@@ -44,6 +44,30 @@
 
 # SPA-style: unknown paths serve the game shell
 [[redirects]]
+  from = "/api/community"
+  to = "/.netlify/functions/community"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/results"
+  to = "/.netlify/functions/results"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/auth/*"
+  to = "/.netlify/functions/accounts/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api-not-found"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
