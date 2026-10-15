@@ -13,10 +13,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
       - name: Install
-        run: npm ci
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Unit tests
         run: npm test
       - name: Production build
@@ -26,18 +26,21 @@ jobs:
 
   qa-smoke:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
       - name: Install
-        run: npm ci
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Install Chrome headless shell
-        run: npx --yes @puppeteer/browsers install chrome-headless-shell@stable
+        run: npx --no-install browsers install chrome-headless-shell@stable --path "$HOME/.cache/puppeteer"
       - name: QA smoke
         run: npm run qa
         env:
           CI: '1'
+      - name: Responsive layouts
+        run: npm run qa:responsive
+      - name: Multiplayer gameplay
+        run: npm run qa:multiplayer

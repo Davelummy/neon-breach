@@ -1,5 +1,7 @@
 # Merge readiness — community foundation
 
+> Release preparation update, 2026-10-15: fresh recovery checks now pass with 174 tests, six Firebase emulator tests, campaign QA, multiplayer QA and all ten responsive layouts. See `recovery-status.md` for current evidence and `internet-multiplayer.md` for the new internet-mode implementation. Hosted rollout remains blocked on approved private signing-key configuration; no new hardware FPS certification or 100,000-player claim is made. The older review below is retained as historical context.
+
 Branch: `agent/community-foundation`. Review date: 2026-10-06.
 
 ## Scope and recommendation

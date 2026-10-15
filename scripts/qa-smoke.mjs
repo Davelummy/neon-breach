@@ -5,16 +5,11 @@
 // Usage: node scripts/qa-smoke.mjs
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
 import puppeteer from 'puppeteer-core';
+import {qaBrowserPath} from './qa-browser.mjs';
 
 const PORT = 4321;
-const shellRoot = join(homedir(), '.cache', 'puppeteer', 'chrome-headless-shell');
-const { globSync } = await import('node:fs');
-const candidates = globSync(join(shellRoot, '*', '*', 'chrome-headless-shell'));
-const installedChrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const executablePath = process.env.CHROME_PATH || (existsSync(installedChrome) ? installedChrome : candidates.find(existsSync));
+const executablePath = qaBrowserPath();
 if (!executablePath || !existsSync(executablePath)) { console.error('FAIL: Chrome executable not found; set CHROME_PATH'); process.exit(1); }
 
 const server = spawn(process.execPath, ['scripts/serve.mjs'], { env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });

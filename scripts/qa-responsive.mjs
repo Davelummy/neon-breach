@@ -1,16 +1,14 @@
 // Geometry/layout regression only; compatibility rendering is NOT FPS evidence.
 import {spawn} from 'node:child_process';
-import {existsSync,globSync} from 'node:fs';
 import {mkdir} from 'node:fs/promises';
-import {homedir} from 'node:os';
 import puppeteer from 'puppeteer-core';
+import {qaBrowserPath} from './qa-browser.mjs';
 const port=4323,artifacts='.codex/artifacts/responsive';
-const paths=['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',...globSync(homedir()+'/.cache/puppeteer/chrome-headless-shell/*/*/chrome-headless-shell')];
 const server=spawn(process.execPath,['scripts/serve.mjs'],{env:{...process.env,PORT:String(port)},stdio:'ignore'});
 let browser;
 try{
   await mkdir(artifacts,{recursive:true});await new Promise(r=>setTimeout(r,500));
-  browser=await puppeteer.launch({executablePath:paths.find(existsSync),timeout:60000,args:['--no-sandbox','--mute-audio']});
+  browser=await puppeteer.launch({executablePath:qaBrowserPath(),timeout:60000,args:['--no-sandbox','--mute-audio']});
   const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setViewport({width:390,height:844,isMobile:true,hasTouch:true,deviceScaleFactor:1});
   await page.goto(`http://127.0.0.1:${port}/?qa&renderer=compat`,{waitUntil:'domcontentloaded'});
@@ -62,4 +60,9 @@ try{
     console.log(`PASS ${width}x${height}: menus, gameplay controls, scrolling`);
   }
   if(errors.length)throw Error(errors.join('\n'));console.log('RESPONSIVE GREEN (layout only; physical-device coverage still required)');
-}finally{await browser?.close();server.kill();}
+}finally{
+  let timer;
+  if(browser){try{await Promise.race([browser.close().catch(()=>{}),new Promise(resolve=>timer=setTimeout(resolve,5000))]);}finally{clearTimeout(timer);try{browser.disconnect();}catch{}const child=browser.process();if(child&&child.exitCode===null)child.kill('SIGTERM');}}
+  server.kill();
+}
+process.exit(0);
