@@ -12,10 +12,12 @@ The Render service exposes only a public health response and the authenticated m
 
 Netlify production Functions environment:
 
-Deployment gate (2026-10-15): this site's Free plan rejected Functions-only environment scopes with HTTP 403. Do not upgrade or silently broaden the signing key to build/runtime/post-processing scopes. The owner must approve an alternative trust boundary before provisioning the service or calling the release operational. No signing value belongs in this document or the repository.
+Free-plan trust boundary (owner approved 2026-10-15): this site's plan rejects Functions-only environment scopes. Production therefore uses standard private environment settings, available to authorized site admins and build/function/runtime/post-processing stages. This is not Netlify's restricted, non-readable secret setting. Never serialize these settings into browser assets or logs; scan the published build for the actual signing value before release. No signing value belongs in this document or the repository.
 
 - `NEON_MATCH_SERVER_URL`: the actual WSS service URL ending in `/api/multiplayer/socket`.
 - `NEON_MATCH_SECRET`: a cryptographically random, private signing value of at least 32 bytes, shared only with the match service. Never place it in build output or a public client setting.
+
+The pilot endpoint is `wss://neon-breach-match.onrender.com/api/multiplayer/socket`. Render service `neon-breach-match` uses the Free plan in Frankfurt and tracks the existing repository's `main` branch. A configured endpoint alone does not establish hosted readiness; verify health, account/ticket routes and two-client WSS joins after deployment.
 
 Render Free service environment:
 
