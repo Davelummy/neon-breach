@@ -15,6 +15,7 @@
     "blender:check": "node scripts/blender/run-healthcheck.mjs",
     "mcp:check": "node scripts/check-mcp-prereqs.mjs",
     "start": "SERVE_DIST=1 node scripts/serve.mjs --dist",
+    "start:multiplayer": "node scripts/serve-match.mjs",
     "db:generate": "drizzle-kit generate",
     "netlify:build": "npm run build",
     "netlify:deploy": "npm run build && npx --yes netlify-cli deploy --prod"

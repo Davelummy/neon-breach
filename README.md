@@ -23,7 +23,7 @@ npm run dev
 
 Run `PORT=4176 npm run dev`, open the main game, sign in and select **Multiplayer · Create / join room**. Create a private day/night room and share its code/invite. The free-for-all supports 2–8 players, campaign-paced walking and sprinting, shared taxis/kekes/buses, server-owned hits/kills, timed respawns and rotating arenas. Options/Escape opens the match menu and stops your inputs; the live match continues. Keyboard, touch and simulated standard-controller controls are covered by browser tests. Use throwaway passwords over local HTTP.
 
-The delivery target is internet play across networks, but deployment is explicitly deferred: the current preview still needs both players to reach the development server. Rooms/results are memory-only. Static Netlify hosting alone does not run the match service, and this mode is not public-launch or load-certified. See [scope and verification](docs/private-multiplayer-prototype.md) and [internet deployment gates](docs/online-multiplayer-deployment.md). Run `npm run qa:multiplayer` for the main-menu, movement and two-browser combat test.
+Internet play uses the same main-menu interface, with a separate authenticated WSS match service and short-lived, single-use tickets from the Netlify account API. See [internet multiplayer deployment](docs/internet-multiplayer.md) for configuration, security boundaries and Free-plan pilot limits. Rooms/results are memory-only; this is not public-launch or load-certified. Run `npm run qa:multiplayer` for the main-menu, movement and two-browser combat test.
 
 ## Campaign operations
 
@@ -119,7 +119,7 @@ Roadmap to 10/10: [`docs/ten-out-of-ten-plan.md`](docs/ten-out-of-ten-plan.md)
 - Boss phase **abilities** + mid-fight pulses: shockwave / cloak / slam
 - **Destroy** stage (vault relays) + 3D relay markers
 - **Role silhouette FX** (sniper glint, shield arc, dash trail, charge ring)
-- **Op-specific rules** (`OP_RULES`): Night Raptor forced night + stealth, Iron Harvest vehicle stage + layout patches, First Strike open routes
+- **Op-specific rules** (`OP_RULES`): Night Raptor stealth, Iron Harvest vehicle stage + layout patches, First Strike open routes; day/night remains player-selectable, separately from night vision.
 - **Finisher camera** with letterbox (longer for commanders)
 - **Medals** + career rack; **Daily challenge** modifiers (UTC seed)
 - Expanded **perks**, combat hitstop, multi-step tutorial

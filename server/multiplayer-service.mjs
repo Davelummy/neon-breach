@@ -5,9 +5,9 @@ export function multiplayerOrigin(request,publicOrigin){
   if(publicOrigin){const url=new URL(publicOrigin);if(url.protocol!=='https:'||url.origin!==publicOrigin||url.username||url.password)throw Error('Public multiplayer origin must be an exact HTTPS origin.');return url.origin;}
   return `http://${request.headers.host}`;
 }
-export function attachMultiplayer(server,accounts,{publicOrigin}={}){
+export function attachMultiplayer(server,accounts,{publicOrigin,authenticate,revalidate}={}){
   if(publicOrigin)multiplayerOrigin({headers:{}},publicOrigin);
-  const wss=new WebSocketServer({noServer:true,maxPayload:2048,perMessageDeflate:false}),rooms=new Map(),identities=new Set();let pending=0,ticks=0;
+  const wss=new WebSocketServer({noServer:true,maxPayload:2048,perMessageDeflate:false,handleProtocols:protocols=>protocols.has('neon-v1')?'neon-v1':false}),rooms=new Map(),identities=new Set();let pending=0,ticks=0;
   const send=(ws,data)=>{if(ws.readyState!==WebSocket.OPEN)return;if(ws.bufferedAmount>64000){ws.close(1013,'Slow connection');return;}ws.send(JSON.stringify(data));};
   const deny=(socket,status)=>{if(!socket.destroyed)socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);};
   server.on('upgrade',async(request,socket,head)=>{
@@ -19,10 +19,10 @@ export function attachMultiplayer(server,accounts,{publicOrigin}={}){
     if(request.headers.origin!==origin||pending>=16||wss.clients.size>=64)return deny(socket,'403 Forbidden');
     pending++;socket.setTimeout(10000,()=>socket.destroy());let reserved=false,uid;
     try{
-      const auth=await accounts.identify(new Request(new URL(request.url,origin),{headers:request.headers}));
+      const auth=authenticate?await authenticate(request):await accounts.identify(new Request(new URL(request.url,origin),{headers:request.headers}));
       if(!auth)return deny(socket,'401 Unauthorized');if(identities.has(auth.user.id))return deny(socket,'409 Conflict');
       if(socket.destroyed)return;uid=auth.user.id;identities.add(uid);reserved=true;socket.setTimeout(0);socket.once('close',()=>{if(reserved){identities.delete(uid);reserved=false;}});
-      wss.handleUpgrade(request,socket,head,ws=>{ws.identity=auth.user;ws.authRequest=new Request(new URL(request.url,origin),{headers:request.headers});wss.emit('connection',ws);reserved=false;});
+      wss.handleUpgrade(request,socket,head,ws=>{ws.identity=auth.user;ws.authContext=auth;ws.authRequest=new Request(new URL(request.url,origin),{headers:request.headers});wss.emit('connection',ws);reserved=false;});
     }catch{if(reserved){identities.delete(uid);reserved=false;}deny(socket,'503 Service Unavailable');}finally{pending--;}
   });
   wss.on('connection',ws=>{
@@ -53,7 +53,7 @@ export function attachMultiplayer(server,accounts,{publicOrigin}={}){
   },50);tick.unref();
   const heartbeat=setInterval(async()=>{
     for(const ws of wss.clients){if(!ws.alive){ws.terminate();continue;}ws.alive=false;ws.ping();
-      if(Date.now()-ws.authAt>60000){ws.authAt=Date.now();try{if(!await accounts.identify(ws.authRequest))ws.close(1008,'Sign in again');}catch{ws.close(1013,'Account service unavailable');}}
+      if(Date.now()-ws.authAt>60000){ws.authAt=Date.now();try{if(!(revalidate?await revalidate(ws):await accounts.identify(ws.authRequest)))ws.close(1008,'Sign in again');}catch{ws.close(1013,'Account service unavailable');}}
     }
   },15000);heartbeat.unref();
   server.on('close',()=>{clearInterval(tick);clearInterval(heartbeat);for(const ws of wss.clients)ws.terminate();wss.close();});

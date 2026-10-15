@@ -11,7 +11,7 @@ body.playing.touch-mode #touch{display:block}body.playing:not(.touch-mode) #touc
 <div id="lobby"><section>
   <button id="back" type="button">← Main game</button><button id="lobbyLogout" type="button" disabled>Log out</button>
   <h1>Multiplayer</h1><p>Free-for-all · 2–8 players · kills & respawns</p>
-  <p class="muted">Local preview · internet hosting is not connected yet. Rooms are temporary; campaign saves stay separate.</p>
+  <p class="muted" id="connectionMode">Checking the match service… Rooms are temporary; campaign saves stay separate.</p>
   <label>Starting arena<select id="arena"><option value="city-gate">City Gate Approach</option><option value="millennium-park">Millennium Park</option><option value="jabi-lake">Jabi Lake Waterfront</option></select></label>
   <label>Time of day<select id="timeOfDay"><option value="day">Day</option><option value="night">Night</option></select></label>
   <button id="create" disabled>Create private room</button>

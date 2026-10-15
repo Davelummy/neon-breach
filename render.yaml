@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: neon-breach-match
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+    startCommand: npm run start:multiplayer
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NEON_APP_ORIGIN
+        value: https://neon-breach-fps.netlify.app
+      - key: NEON_MATCH_SECRET
+        sync: false

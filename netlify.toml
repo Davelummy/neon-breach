@@ -7,7 +7,7 @@
   functions = "netlify/functions"
 
 [build.environment]
-  NODE_VERSION = "20"
+  NODE_VERSION = "24"
 
 [functions]
   node_bundler = "esbuild"
@@ -58,6 +58,18 @@
 [[redirects]]
   from = "/api/auth/*"
   to = "/.netlify/functions/accounts/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/multiplayer"
+  to = "/.netlify/functions/multiplayer"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/multiplayer/*"
+  to = "/.netlify/functions/multiplayer/:splat"
   status = 200
   force = true
 

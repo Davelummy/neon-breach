@@ -6,5 +6,7 @@
 /api/community    /.netlify/functions/community    200
 /api/results      /.netlify/functions/results      200
 /api/auth/*       /.netlify/functions/accounts/:splat 200
+/api/multiplayer  /.netlify/functions/multiplayer 200
+/api/multiplayer/* /.netlify/functions/multiplayer/:splat 200
 /api/*            /.netlify/functions/api-not-found 200
 /*                /index.html                      200
