@@ -1944,9 +1944,13 @@ let accountCheckPending=true;
         return renderCamera;
       }
       const car=state.cars[player.carIndex],bounds=vehicleBounds(car),height=car.kind==='bus'?2:car.kind==='tricycle'?1.25:.96,minDistance=bounds.halfLength+.45;
-      let distance=car.kind==='bus'?4.2:2.55,cx=car.x-Math.cos(car.dir)*distance,cy=car.y-Math.sin(car.dir)*distance;
-      while(distance>minDistance&&blocksAt(cx,cy,height+.72)){distance=Math.max(minDistance,distance-.18);cx=car.x-Math.cos(car.dir)*distance;cy=car.y-Math.sin(car.dir)*distance;}
-      renderCamera.x=cx;renderCamera.y=cy;renderCamera.z=height;renderCamera.dir=car.dir+(car.lookYaw||0);renderCamera.pitch=player.pitch*.28-(car.kind==='bus'?canvas.height*.1:24);renderCamera.roll=0;return renderCamera;
+      // Keep the whole car→camera line clear of walls (not just the end point). With no room behind
+      // (e.g. a keke parked against a building), pull in and rise over the roof instead of sitting in the wall.
+      const back=car.dir+Math.PI,lineClear=d=>{for(let s=.25;s<=d;s+=.15)if(blocksAt(car.x+Math.cos(back)*s,car.y+Math.sin(back)*s,height+.72))return false;return true;};
+      let distance=car.kind==='bus'?4.2:2.55;
+      while(distance>0&&!lineClear(distance))distance=Math.max(0,distance-.15);
+      const tucked=Math.max(0,minDistance-distance),cx=car.x+Math.cos(back)*distance,cy=car.y+Math.sin(back)*distance;
+      renderCamera.x=cx;renderCamera.y=cy;renderCamera.z=height+tucked*.85+(tucked>0?.35:0);renderCamera.dir=car.dir+(car.lookYaw||0);renderCamera.pitch=player.pitch*.28-(car.kind==='bus'?canvas.height*.1:24);renderCamera.roll=0;return renderCamera;
     }
 
     function viewFov(){return player.carIndex>=0?FOV*(1.12+Math.min(.09,Math.abs(state.cars[player.carIndex].speed)*.008)):FOV*(1-player.ads*weaponConfig().zoom)*(1+(player.jetFov||0));}
