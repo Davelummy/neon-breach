@@ -8,7 +8,7 @@ test('actual browser input packets retain strict action types and bounded analog
   const source=readFileSync(new URL('../public/multiplayer.js',import.meta.url),'utf8');
   let pad=null,driving=false,usable=false,now=1000;
   const board={open:false},touch={forward:0,strafe:0,fire:false,reload:false,jump:false,aim:false,sprint:false,interact:false};
-  const sample=runInNewContext(`let squareDown=0,squareFired=false,seq=0,angle=0,pitch=0,optionsHeld=false;${source.slice(source.indexOf('const input=()=>'),source.indexOf('function resetInput'))}input`,{
+  const sample=runInNewContext(`let squareDown=0,squareFired=false,seq=0,angle=0,pitch=0,optionsHeld=false,state=null,resultConfirmHeld=false,resultBackHeld=false;${source.slice(source.indexOf('const input=()=>'),source.indexOf('function resetInput'))}input`,{
     activePad:()=>pad,performance:{now:()=>now},keys:new Set(),touch,
     $:id=>id==='board'?board:{hidden:!usable},document:{body:{classList:{contains:()=>driving}}}
   });

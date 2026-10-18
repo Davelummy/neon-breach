@@ -34,7 +34,7 @@ export function attachMultiplayer(server,accounts,{publicOrigin,authenticate,rev
       if(binary)return ws.close(1008,'JSON required');const now=Date.now();if(now-ws.window>=1000){ws.window=now;ws.messages=0;}if(++ws.messages>60)return ws.close(1008,'Input rate exceeded');
       let value;try{value=JSON.parse(raw.toString());}catch{return ws.close(1008,'Invalid JSON');}
       if(!value||typeof value!=='object'||Array.isArray(value))return ws.close(1008,'Invalid message');
-      if(ws.room){if(value.type==='input'){ws.room.input(ws.player,value);}else if(value.type==='leave'){ws.close(1000,'Left room');}return;}
+      if(ws.room){if(value.type==='input'){ws.room.input(ws.player,value);}else if(value.type==='rematch'){ws.room.restart(ws.player);}else if(value.type==='leave'){ws.close(1000,'Left room');}return;}
       try{
         let room;
         if(value.type==='create'){
@@ -48,8 +48,10 @@ export function attachMultiplayer(server,accounts,{publicOrigin,authenticate,rev
     });
     ws.on('close',()=>{clearTimeout(joinTimeout);identities.delete(ws.identity.id);if(ws.room){ws.room.leave(ws.identity.id);if(!ws.room.players.size)rooms.delete(ws.room.code);}});
   });
+  let lastTick=performance.now();
   const tick=setInterval(()=>{
-    ticks++;for(const room of rooms.values()){const round=room.round;room.tick();if(ticks%2===0){for(const ws of wss.clients)if(ws.room===room){if(round!==room.round||ws.round!==room.round){send(ws,{type:'world',world:room.world});ws.round=room.round;}send(ws,room.snapshot());}room.events=[];}}
+    const now=performance.now(),elapsed=(now-lastTick)/1000;lastTick=now;
+    ticks++;for(const room of rooms.values()){const round=room.round;room.tick(elapsed);if(ticks%2===0){for(const ws of wss.clients)if(ws.room===room){if(round!==room.round||ws.round!==room.round){send(ws,{type:'world',world:room.world});ws.round=room.round;}send(ws,room.snapshot());}room.events=[];}}
   },50);tick.unref();
   const heartbeat=setInterval(async()=>{
     for(const ws of wss.clients){if(!ws.alive){ws.terminate();continue;}ws.alive=false;ws.ping();

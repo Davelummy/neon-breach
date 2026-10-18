@@ -2,6 +2,7 @@
 // callback so the game controls muting without a hard dependency.
 
 export class AudioSystem {
+  close() { this.stopRadio();this.stopMenuMusic();this.jetThrust(false);this.stopHum();return this.ctx?.close()||Promise.resolve(); }
   constructor(isMuted = () => false) {
     this.muted = isMuted;
     const AC = window.AudioContext || window.webkitAudioContext;

@@ -423,8 +423,16 @@ let accountCheckPending=true;
       renderDailyPanel();
     }
 
+    let arenaPreview=null,arenaPreviewToken=0;
+    async function refreshArenaPreview(){
+      const token=++arenaPreviewToken,container=$('arenaPreview');
+      if(!$('screenOps').classList.contains('active')||state.mode!=='menu'){arenaPreview?.dispose();arenaPreview=null;return;}
+      try{const {createArenaPreview}=await import('./arena-preview.js');if(token!==arenaPreviewToken)return;arenaPreview||=createArenaPreview(container);arenaPreview.setArena(state.arenaId);arenaPreview.setTime(state.timeOfDay);$('arenaPreviewNote').textContent='3D arena preview · drag or use arrow keys to rotate';}
+      catch{container.replaceChildren();$('arenaPreviewNote').textContent='3D preview unavailable. You can still select an arena and lighting.';}
+    }
     function showMenuScreen(id){
       document.querySelectorAll('.menu-screen').forEach(el=>el.classList.toggle('active',el.id===id));
+      void refreshArenaPreview();
       if(id==='screenMain')document.querySelectorAll('#screenMain details').forEach(el=>el.open=false);
       updateMissionOptionsSummary();
       menuFocusIndex=0;
@@ -644,6 +652,7 @@ let accountCheckPending=true;
       $('vehicleButton')?.addEventListener('click',e=>{if(e.detail===0)toggleVehicle();});
       $('nightVisionButton').onclick=toggleNightVision;
       $('pausedNvg').onclick=toggleNightVision;$('campaignTime').onchange=()=>setMissionTime($('campaignTime').value);
+      $('arenaSelect')?.addEventListener('change',()=>void refreshArenaPreview());
       const loadout=$('loadoutWeapon');
       if(loadout){loadout.replaceChildren();WEAPONS.forEach((weapon,index)=>{const option=document.createElement('option');option.value=String(index);option.textContent=`${weapon.name} · ${weapon.mag} rounds`;loadout.append(option);});loadout.value=String(selectedLoadout);loadout.addEventListener('change',()=>{selectStartingWeapon(Number(loadout.value));loadout.value=String(selectedLoadout);});}
       const station=$('radioStation'),musicVolume=$('radioVolume');
@@ -938,6 +947,7 @@ let accountCheckPending=true;
       document.querySelectorAll('[data-time]').forEach(button=>button.classList.toggle('active',button.dataset.time===selected));$('missionClock').textContent=condition.clock;$('missionCondition').textContent=condition.condition;$('missionBriefText').textContent=condition.brief;
       if(persist){try{localStorage.setItem('neon-breach-time',selected);}catch{}}
       updateMissionOptionsSummary();
+      arenaPreview?.setTime(selected);
     }
     function updateMissionOptionsSummary(){const summary=$('missionOptionsSummary');if(summary)summary.textContent=`${DIFFICULTIES[state.difficulty]?.label||'OPERATIVE'} · ${state.timeOfDay==='night'?'Night':'Day'} · Options`;}
 

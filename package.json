@@ -13,6 +13,7 @@
     "qa:multiplayer": "node scripts/qa-multiplayer.mjs",
     "qa:guest": "node scripts/qa-guest.mjs",
     "qa:visual": "node scripts/qa-visual.mjs",
+    "qa:arena-preview": "node scripts/qa-arena-preview.mjs",
     "verify": "npm test && npm run qa",
     "blender:check": "node scripts/blender/run-healthcheck.mjs",
     "mcp:check": "node scripts/check-mcp-prereqs.mjs",

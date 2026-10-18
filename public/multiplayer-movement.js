@@ -19,10 +19,11 @@ export function footOpen(world,x,y,z=0){return openAt(world,x,y,z)&&!(world.vehi
 export function movePlayer(p,input,world){
   const jump=!!input?.jump;if(input){p.angle=input.angle;p.pitch=input.pitch;}
   const floor=surfaceAt(world,p.x,p.y),grounded=p.z<=floor+.001;
+  if(grounded)p.jetEmpty=false;
   if(jump&&!p.jumpHeld&&grounded)p.vz=3.5;p.jumpHeld=jump;
   p.jetFuel=Math.max(0,Math.min(100,p.jetFuel??100));
-  p.jetting=jump&&(p.vz>0||!grounded)&&p.jetFuel>0&&p.z<RULES.jetHeight;
-  if(p.jetting){p.vz=Math.min(3.25,p.vz+11.5*RULES.tick);p.jetFuel=Math.max(0,p.jetFuel-RULES.jetDrain*RULES.tick);}
+  p.jetting=jump&&!p.jetEmpty&&(p.vz>0||!grounded)&&p.jetFuel>0;
+  if(p.jetting){const headroom=Math.max(-.35,Math.min(1,(RULES.jetHeight-p.z)/1.3)),target=3.25*headroom;p.vz+=(target-p.vz)*Math.min(1,RULES.tick*(p.vz<target?5.5:9));p.jetFuel=Math.max(0,p.jetFuel-RULES.jetDrain*RULES.tick*(.55+.45*Math.max(0,headroom)));if(p.jetFuel===0)p.jetEmpty=true;}
   else{p.vz-=8.7*RULES.tick;p.jetFuel=Math.min(100,p.jetFuel+RULES.tick*(grounded?RULES.jetRecharge:jump?0:4));}
   p.z=Math.max(floor,Math.min(RULES.jetHeight,p.z+p.vz*RULES.tick));if(p.z===floor)p.vz=0;else if(p.z===RULES.jetHeight)p.vz=Math.min(0,p.vz);
   if(!input){p.moveVx=p.moveVy=0;return;}

@@ -31,6 +31,7 @@ async function minifyEsm(code, label) {
 
 const html = await readFile('public/neon-breach.html', 'utf8');
 const weaponCards=await readFile('public/weapon-cards.js','utf8'),weaponPreview=await readFile('public/weapon-preview.js','utf8'),weaponCardStyles=await readFile('public/weapon-cards.css','utf8');
+const arenaPreview=await readFile('public/arena-preview.js','utf8');
 const manifest = await readFile('public/manifest.webmanifest', 'utf8');
 const icon = await readFile('public/icon.svg', 'utf8');
 let scene3d = await readFile('public/scene3d.js', 'utf8');
@@ -66,7 +67,7 @@ renderUtils = await minifyEsm(renderUtils, 'render-utils.js');
 
 // Content hash for service worker cache busting (dist only).
 const hashSource = [html, gameJs, scene3d, dataJs, audioJs, renderUtils, communityJs, accountsJs, combatJs, mobileJs, vehicleRadioJs, checkpointJs, resultsJs, resultsHtml,multiplayerJs,multiplayerMovement,multiplayerHtml,combatPresentation,combatInterface,vehiclePresentation,multiplayerVehicles,cityLife,vehicleHandling,manifest].join('\n');
-const buildHash = createHash('sha256').update(hashSource).update(weaponCards).update(weaponPreview).update(weaponCardStyles).digest('hex').slice(0, 12);
+const buildHash = createHash('sha256').update(hashSource).update(weaponCards).update(weaponPreview).update(weaponCardStyles).update(arenaPreview).digest('hex').slice(0, 12);
 serviceWorker = serviceWorker.replaceAll('__BUILD_HASH__', buildHash);
 
 await writeFile('dist/game.js', gameJs);
@@ -132,6 +133,7 @@ const campaignIndex = ${JSON.stringify(campaignIndex)};
 const assets = {
   '/weapon-cards.js': { body: ${JSON.stringify(weaponCards)}, type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
   '/weapon-preview.js': { body: ${JSON.stringify(weaponPreview)}, type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+  '/arena-preview.js': { body: ${JSON.stringify(arenaPreview)}, type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
   '/weapon-cards.css': { body: ${JSON.stringify(weaponCardStyles)}, type: 'text/css; charset=utf-8', cache: 'no-cache' },
   '/multiplayer.html': { body: ${JSON.stringify(multiplayerHtml)}, type: 'text/html; charset=utf-8', cache: 'no-cache' },
   '/multiplayer.js': { body: ${JSON.stringify(multiplayerJs)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
