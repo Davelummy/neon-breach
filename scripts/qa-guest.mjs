@@ -25,11 +25,17 @@ try{
   check('guest identity is stored on this device',/^guest-[a-z0-9]{8,32}$/.test(guestId),guestId);
   await page.evaluate(()=>document.getElementById('welcomeGate')?.classList.add('hidden'));
   const campaignRequestsBeforeGuest=campaignRequests.length;
+  const boardRead=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/leaderboard'&&r.request().method()==='GET',{timeout:30000}).catch(()=>null);
   await page.click('#screenMain [data-goto="screenRanks"]');
+  await waitFor(page,()=>document.getElementById('screenRanks').classList.contains('active'));
+  check('guest can browse the world leaderboard read-only',Boolean(await boardRead)&&await page.evaluate(()=>document.getElementById('accountGate').classList.contains('hidden')&&!document.getElementById('guestBoardNote').classList.contains('hidden')));
+  await page.click('#guestBoardSignup');
   await waitFor(page,()=>!document.getElementById('accountGate').classList.contains('hidden'));
-  check('Leaderboard explains why a guest needs an account',await page.evaluate(()=>/world leaderboard/.test(document.getElementById('accountReason').textContent)&&!document.getElementById('screenRanks').classList.contains('active')));
+  check('posting from the leaderboard explains why a guest needs an account',await page.evaluate(()=>/post your scores/.test(document.getElementById('accountReason').textContent)));
   await page.click('#accountGuest');
   await waitFor(page,()=>document.getElementById('accountGate').classList.contains('hidden'));
+  await page.evaluate(()=>document.querySelector('#screenRanks [data-goto="screenMain"]').click());
+  await waitFor(page,()=>document.getElementById('screenMain').classList.contains('active'));
   await page.click('#multiplayerButton');
   await waitFor(page,()=>!document.getElementById('accountGate').classList.contains('hidden'));
   check('Multiplayer asks a guest to create an account',await page.evaluate(()=>{const r=document.getElementById('accountReason');return !r.hidden&&r.getBoundingClientRect().height>0&&/Multiplayer needs an account/.test(r.textContent)&&!document.getElementById('multiplayerPanel').open;}));

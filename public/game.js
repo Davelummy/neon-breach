@@ -408,12 +408,12 @@ let accountCheckPending=true;
     }
 
     function showMenuScreen(id){
-      if(id==='screenRanks'&&isGuest()){showAccountGate('Create an account or sign in to use the world leaderboard. Your guest campaign stays saved on this device.');return;}
       document.querySelectorAll('.menu-screen').forEach(el=>el.classList.toggle('active',el.id===id));
       if(id==='screenMain')document.querySelectorAll('#screenMain details').forEach(el=>el.open=false);
       updateMissionOptionsSummary();
       menuFocusIndex=0;
-      if(id==='screenRanks')loadLeaderboard();
+      // Guests may browse the world board; only posting scores needs an account.
+      if(id==='screenRanks'){$('guestBoardNote')?.classList.toggle('hidden',!isGuest());loadLeaderboard();}
       requestAnimationFrame(()=>refreshMenuFocus(true));
     }
 
@@ -2711,6 +2711,7 @@ let accountCheckPending=true;
       mergeWallets(interfaceStorage,from,to);
       try{const local=JSON.parse(localStorage.getItem(LOCAL_CAMPAIGN_KEY)||'null');if(local?.owner===from){local.owner=to;if(local.active?.checkpoint?.owner===from)local.active.checkpoint.owner=to;localStorage.setItem(LOCAL_CAMPAIGN_KEY,JSON.stringify(local));}}catch{}
     });
+    $('guestBoardSignup')?.addEventListener('click',()=>showAccountGate('Create an account or sign in to post your scores to the world leaderboard. Your guest campaign stays saved on this device.'));
     $('guestPostScore')?.addEventListener('click',()=>showAccountGate('Create an account or sign in to post this run to the world leaderboard. Your guest progress on this device comes with you.'));
     const accountInitialization=initializeAccounts(user=>{if(user&&!user.guest&&pendingGuestScore){const run=pendingGuestScore;pendingGuestScore=null;$('guestPostScore')?.classList.add('hidden');submitPartyScore(run);}if(user){$('settingCallsign').value=user.username;startCommunity(loadLeaderboard);if(!accountCheckPending)loadCampaignRecords();}else if(state.mode==='playing')pauseGame();}).finally(()=>{accountCheckPending=false;});
     setMissionTime(preferredTime,false);setAutoLock(preferredAutoLock,false,false);setGore(preferredGore,false);setOperation(preferredOperation,false);renderArsenal();renderDailyPanel();updateBestScore();loadCampaignRecords();initAssets();resize();setupTouch();render();runBootSplash();armMenuMusicOnGesture();sendTelemetry('loaded');requestAnimationFrame(frame);
