@@ -53,6 +53,8 @@ const multiplayerMovement=await minifyEsm(await readFile('public/multiplayer-mov
 const multiplayerHtml=await readFile('public/multiplayer.html','utf8');
 const combatPresentation=await minifyEsm(await readFile('public/combat-presentation.js','utf8'),'combat-presentation.js');
 const combatInterface=await minifyEsm(await readFile('public/combat-interface.js','utf8'),'combat-interface.js');
+const ammoRules=await minifyEsm(await readFile('public/ammo-rules.js','utf8'),'ammo-rules.js');
+const playerProgression=await minifyEsm(await readFile('public/player-progression.js','utf8'),'player-progression.js');
 const vehiclePresentation=await minifyEsm(await readFile('public/vehicle-presentation.js','utf8'),'vehicle-presentation.js');
 const multiplayerVehicles=await minifyEsm(await readFile('public/multiplayer-vehicles.js','utf8'),'multiplayer-vehicles.js');
 const cityLife=await minifyEsm(await readFile('public/city-life.js','utf8'),'city-life.js');
@@ -66,7 +68,7 @@ audioJs = await minifyEsm(audioJs, 'audio.js');
 renderUtils = await minifyEsm(renderUtils, 'render-utils.js');
 
 // Content hash for service worker cache busting (dist only).
-const hashSource = [html, gameJs, scene3d, dataJs, audioJs, renderUtils, communityJs, accountsJs, combatJs, mobileJs, vehicleRadioJs, checkpointJs, resultsJs, resultsHtml,multiplayerJs,multiplayerMovement,multiplayerHtml,combatPresentation,combatInterface,vehiclePresentation,multiplayerVehicles,cityLife,vehicleHandling,manifest].join('\n');
+const hashSource = [html, gameJs, scene3d, dataJs, audioJs, renderUtils, communityJs, accountsJs, combatJs, mobileJs, vehicleRadioJs, checkpointJs, resultsJs, resultsHtml,multiplayerJs,multiplayerMovement,multiplayerHtml,combatPresentation,combatInterface,ammoRules,playerProgression,vehiclePresentation,multiplayerVehicles,cityLife,vehicleHandling,manifest].join('\n');
 const buildHash = createHash('sha256').update(hashSource).update(weaponCards).update(weaponPreview).update(weaponCardStyles).update(arenaPreview).digest('hex').slice(0, 12);
 serviceWorker = serviceWorker.replaceAll('__BUILD_HASH__', buildHash);
 
@@ -74,6 +76,8 @@ await writeFile('dist/game.js', gameJs);
 await writeFile('dist/multiplayer.js',multiplayerJs);
 await writeFile('dist/combat-presentation.js',combatPresentation);
 await writeFile('dist/combat-interface.js',combatInterface);
+await writeFile('dist/ammo-rules.js',ammoRules);
+await writeFile('dist/player-progression.js',playerProgression);
 await writeFile('dist/vehicle-presentation.js',vehiclePresentation);
 await writeFile('dist/multiplayer-vehicles.js',multiplayerVehicles);
 await writeFile('dist/city-life.js',cityLife);
@@ -139,6 +143,8 @@ const assets = {
   '/multiplayer.js': { body: ${JSON.stringify(multiplayerJs)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
   '/multiplayer-movement.js': { body: ${JSON.stringify(multiplayerMovement)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
   '/combat-interface.js': { body: ${JSON.stringify(combatInterface)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/ammo-rules.js': { body: ${JSON.stringify(ammoRules)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/player-progression.js': { body: ${JSON.stringify(playerProgression)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
   '/vehicle-presentation.js': { body: ${JSON.stringify(vehiclePresentation)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
   '/multiplayer-vehicles.js': { body: ${JSON.stringify(multiplayerVehicles)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
   '/city-life.js': { body: ${JSON.stringify(cityLife)}, type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },

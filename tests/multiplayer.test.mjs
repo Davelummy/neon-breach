@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {Match,RULES,validateInput,arenaWorld,openAt,clearShot} from '../server/multiplayer-match.mjs';
-import {map,coverAt,ARENAS} from '../public/data.js';
+import {map,coverAt,ARENAS,WEAPONS} from '../public/data.js';
 import {movePlayer,surfaceAt} from '../public/multiplayer-movement.js';
 import {vehicleOpen} from '../public/multiplayer-vehicles.js';
 const command=(seq,extra={})=>({seq,forward:0,strafe:0,angle:0,pitch:0,fire:false,reload:false,jump:false,...extra});
@@ -103,4 +103,25 @@ test('sustained fire damages vehicle hulls gradually and vehicle impacts award s
   const m=new Match(),a=m.join('a','a'),b=m.join('b','b'),car=m.world.vehicles.find(c=>c.kind==='bus');m.time=3;Object.assign(a,{x:car.x-4,y:car.y,z:0,angle:0,pitch:0});m.fire(a);assert.ok(car.hp<car.maxHp&&car.hp>car.maxHp*.9);assert.equal(car.destroyed,false);
   for(let n=0;n<120&&!car.destroyed;n++){m.time+=.2;a.ammo=30;m.fire(a);}assert.equal(car.destroyed,true);assert.equal(car.hp,0);
   const taxi=m.world.vehicles.find(c=>c.id==='vehicle-6');taxi.dir=0;Object.assign(a,{x:taxi.x,y:taxi.y+1.1,z:0});assert.ok(m.toggleVehicle(a));Object.assign(b,{x:taxi.x+1.1,y:taxi.y,z:0,hp:100,protectedUntil:0});taxi.speed=6;m.input(a,command(1,{forward:1}));m.tick();assert.equal(b.hp,0);assert.equal(a.kills,1);assert.equal(b.deaths,1);
+});
+test('multiplayer magazines reload automatically from finite reserves with the standard carbine timing',()=>{
+  const m=new Match(),a=m.join('a','a');m.time=3;Object.assign(a,{ammo:0,reserve:RULES.magazine+5,reloadUntil:0,nextShot:0});
+  assert.equal(RULES.reload,WEAPONS[0].reload);assert.equal(RULES.magazine,WEAPONS[0].mag);
+  m.tick();assert.ok(a.reloadUntil>m.time,'empty magazine starts an automatic reload');
+  m.time=a.reloadUntil;m.tick();assert.equal(a.ammo,RULES.magazine);assert.equal(a.reserve,5);
+  Object.assign(a,{ammo:0,reloadUntil:0});m.tick();m.time=a.reloadUntil;m.tick();assert.equal(a.ammo,5);assert.equal(a.reserve,0);
+  Object.assign(a,{ammo:0,reloadUntil:0});m.tick();assert.equal(a.reloadUntil,0,'no reload once reserves are spent');
+  m.input(a,command(a.lastSeq+1,{reload:true}));m.tick();assert.equal(a.reloadUntil,0,'manual reload cannot create rounds');
+  const before=m.events.length;m.fire(a);assert.equal(m.events.length,before,'an empty gun does not fire');
+});
+test('crouching slows movement, lowers the shot origin and shrinks the hitbox',()=>{
+  const world=arenaWorld('city-gate'),stand={x:12,y:20,z:0,vz:0,angle:Math.PI/2,hp:100,jetFuel:100},crouch={...stand};
+  for(let n=0;n<8;n++){movePlayer(stand,command(n+1,{forward:1,angle:Math.PI/2}),world);movePlayer(crouch,command(n+1,{forward:1,angle:Math.PI/2,crouch:true}),world);}
+  assert.equal(crouch.crouched,true);assert.ok(Math.hypot(crouch.moveVx,crouch.moveVy)<Math.hypot(stand.moveVx,stand.moveVy)*.6);
+  const sprint={...stand,moveVx:0,moveVy:0};movePlayer(sprint,command(1,{forward:1,crouch:true,sprint:true}),world);assert.equal(sprint.crouched,true);
+  assert.equal(validateInput(command(1,{crouch:1}),0),null);assert.equal(validateInput(command(1,{crouch:true}),0).crouch,true);
+  const m=new Match(),a=m.join('a','a'),b=m.join('b','b');m.time=3;Object.assign(a,{x:12,y:35,z:0,angle:Math.PI/2,pitch:.02,nextShot:0});Object.assign(b,{x:12,y:38,z:0,protectedUntil:0});
+  // A chest-height shot (about 1.5 m) hits a standing target and passes over a crouched one (1.2 m).
+  b.crouched=true;m.fire(a);assert.equal(b.hp,100);b.crouched=false;a.nextShot=0;m.fire(a);assert.equal(b.hp,75);
+  a.crouched=true;a.nextShot=0;m.fire(a);assert.equal(m.events.filter(e=>e.kind==='shot').at(-1).z,1);
 });

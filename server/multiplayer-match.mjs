@@ -3,6 +3,7 @@ import {snapshotArena,ARENAS,DISTRICT_SPAWNS,WALL_HEIGHTS,vehicleBounds} from '.
 import {RULES,openAt,footOpen,movePlayer} from '../public/multiplayer-movement.js';
 import {createFleet,nearbyVehicle,vehicleExit,driveVehicle} from '../public/multiplayer-vehicles.js';
 import {rayVehicleDistance,vehicleBallisticDamage,vehicleImpactDamage} from '../public/combat-rules.js';
+import {shouldAutoReload,reloadRounds} from '../public/ammo-rules.js';
 export {RULES,openAt};
 export function arenaWorld(id){
   return snapshotArena(id);
@@ -20,8 +21,8 @@ export function validateInput(value,last=-1){
   if(!value||!Number.isSafeInteger(value.seq)||value.seq<=last||value.seq>1e9||!['forward','strafe','angle','pitch'].every(k=>Number.isFinite(value[k])))return null;
   if(Math.abs(value.forward)>1||Math.abs(value.strafe)>1||Math.abs(value.angle)>100||Math.abs(value.pitch)>.65)return null;
   if(!['fire','reload','jump'].every(k=>typeof value[k]==='boolean'))return null;
-  if(!['aim','sprint','interact'].every(k=>value[k]===undefined||typeof value[k]==='boolean'))return null;
-  return {seq:value.seq,forward:value.forward,strafe:value.strafe,angle:value.angle,pitch:value.pitch,fire:value.fire,reload:value.reload,jump:value.jump,aim:!!value.aim,sprint:!!value.sprint,interact:!!value.interact};
+  if(!['aim','sprint','interact','crouch'].every(k=>value[k]===undefined||typeof value[k]==='boolean'))return null;
+  return {seq:value.seq,forward:value.forward,strafe:value.strafe,angle:value.angle,pitch:value.pitch,fire:value.fire,reload:value.reload,jump:value.jump,aim:!!value.aim,sprint:!!value.sprint,crouch:!!value.crouch,interact:!!value.interact};
 }
 export class Match {
   constructor(arena='city-gate',code=randomBytes(5).toString('hex').toUpperCase(),timeOfDay='day'){
@@ -36,7 +37,7 @@ export class Match {
       if(distance-seen*12>score){score=distance-seen*12;best=[x,y];}
     }
     if(!best)return false;
-    Object.assign(player,{x:best[0],y:best[1],z:0,vz:0,moveVx:0,moveVy:0,carId:null,interactHeld:false,pendingInteract:false,jumpHeld:false,jetFuel:100,jetEmpty:false,jetting:false,hp:100,ammo:RULES.magazine,deadUntil:0,protectedUntil:this.time+RULES.protection,reloadUntil:0,nextShot:this.time,input:null,inputAt:this.time});
+    Object.assign(player,{x:best[0],y:best[1],z:0,vz:0,moveVx:0,moveVy:0,carId:null,interactHeld:false,pendingInteract:false,jumpHeld:false,crouched:false,jetFuel:100,jetEmpty:false,jetting:false,hp:100,ammo:RULES.magazine,reserve:RULES.reserve,deadUntil:0,protectedUntil:this.time+RULES.protection,reloadUntil:0,nextShot:this.time,input:null,inputAt:this.time});
     player.angle=[12,24,36].some(l=>Math.abs(player.x-l)<1)?(player.y>24?-Math.PI/2:Math.PI/2):(player.x>24?Math.PI:0);player.pitch=0;return true;
   }
   join(uid,name){
@@ -74,7 +75,7 @@ export class Match {
     const car=this.world.vehicles.find(c=>c.id===player.carId);
     if(car){const exit=vehicleExit(this.world,car);if(!exit){this.events.push({kind:'vehicle',id:player.id,message:'Exit blocked · drive into open space'});return false;}this.releaseVehicle(player);Object.assign(player,exit,{z:0,vz:0,moveVx:0,moveVy:0});this.events.push({kind:'vehicle',id:player.id,message:`Exited ${car.name}`});return true;}
     const nearby=nearbyVehicle(this.world,player);if(!nearby)return false;
-    nearby.driver=player.id;nearby.speed=0;player.carId=nearby.id;Object.assign(player,{x:nearby.x,y:nearby.y,z:.62,vz:0,moveVx:0,moveVy:0,angle:nearby.dir,jetting:false});this.events.push({kind:'vehicle',id:player.id,message:`Driving ${nearby.name} · E / Triangle to exit`});return true;
+    nearby.driver=player.id;nearby.speed=0;player.carId=nearby.id;Object.assign(player,{x:nearby.x,y:nearby.y,z:.62,vz:0,moveVx:0,moveVy:0,crouched:false,angle:nearby.dir,jetting:false});this.events.push({kind:'vehicle',id:player.id,message:`Driving ${nearby.name} · Exit button, E or Circle to get out`});return true;
   }
   damagePlayer(attacker,victim,damage){
     if(victim.hp<=0||victim.protectedUntil>this.time)return;
@@ -84,18 +85,18 @@ export class Match {
   fire(player){
     if(this.phase!=='playing'||player.hp<=0||player.carId||player.ammo<=0||player.reloadUntil>this.time||player.nextShot>this.time)return;
     player.nextShot=this.time+RULES.shot;player.ammo--;player.protectedUntil=0;
-    const shot={kind:'shot',id:player.id,x:player.x,y:player.y,z:player.z+1.45,angle:player.angle,pitch:player.pitch};
+    const eye=player.z+(player.crouched?1:1.45),shot={kind:'shot',id:player.id,x:player.x,y:player.y,z:eye,angle:player.angle,pitch:player.pitch};
     this.events.push(shot);
     let victim=null,nearest=35;
     for(const target of this.players.values()){
       if(target===player||target.hp<=0||target.protectedUntil>this.time)continue;
       const dx=target.x-player.x,dy=target.y-player.y,horizontal=dx*Math.cos(player.angle)+dy*Math.sin(player.angle),side=Math.abs(-dx*Math.sin(player.angle)+dy*Math.cos(player.angle));
       if(horizontal<=0||horizontal>=nearest||side>.32)continue;
-      const distance=horizontal/Math.cos(player.pitch),height=player.z+1.45+Math.sin(player.pitch)*distance;
-      if(height<target.z+.15||height>target.z+1.75||!clearShot(this.world,player.x,player.y,player.z+1.45,player.angle,player.pitch,distance))continue;
+      const distance=horizontal/Math.cos(player.pitch),height=eye+Math.sin(player.pitch)*distance;
+      if(height<target.z+.15||height>target.z+(target.crouched?1.2:1.75)||!clearShot(this.world,player.x,player.y,eye,player.angle,player.pitch,distance))continue;
       nearest=horizontal;victim=target;
     }
-    let vehicle=null;for(const car of this.world.vehicles){if(car.destroyed)continue;const distance=rayVehicleDistance(player.x,player.y,player.angle,car,nearest);if(distance===null||distance<=0)continue;const height=player.z+1.45+Math.tan(player.pitch)*distance;if(height<0||height>vehicleBounds(car).height||!clearShot(this.world,player.x,player.y,player.z+1.45,player.angle,player.pitch,distance/Math.cos(player.pitch)))continue;vehicle=car;nearest=distance;}
+    let vehicle=null;for(const car of this.world.vehicles){if(car.destroyed)continue;const distance=rayVehicleDistance(player.x,player.y,player.angle,car,nearest);if(distance===null||distance<=0)continue;const height=eye+Math.tan(player.pitch)*distance;if(height<0||height>vehicleBounds(car).height||!clearShot(this.world,player.x,player.y,eye,player.angle,player.pitch,distance/Math.cos(player.pitch)))continue;vehicle=car;nearest=distance;}
     const traceDistance=traceShotDistance(this.world,player.x,player.y,shot.z,player.angle,player.pitch,Math.min(35,nearest/Math.cos(player.pitch)));
     shot.endX=player.x+Math.cos(player.angle)*Math.cos(player.pitch)*traceDistance;shot.endY=player.y+Math.sin(player.angle)*Math.cos(player.pitch)*traceDistance;shot.endZ=shot.z+Math.sin(player.pitch)*traceDistance;
     if(vehicle){vehicle.hp=Math.max(0,vehicle.hp-vehicleBallisticDamage(RULES.damage));this.events.push({kind:'hit',id:player.id,target:vehicle.id,damage:vehicleBallisticDamage(RULES.damage)});if(!vehicle.hp){vehicle.destroyed=true;vehicle.speed=0;const driver=[...this.players.values()].find(p=>p.id===vehicle.driver);vehicle.driver=null;if(driver){driver.carId=null;const exit=vehicleExit(this.world,vehicle);if(exit)Object.assign(driver,exit);driver.z=0;this.damagePlayer(player,driver,80);}this.events.push({kind:'vehicle',id:player.id,message:`${vehicle.name} destroyed`});}return;}
@@ -112,17 +113,18 @@ export class Match {
       if(p.hp<=0){if(this.time>=p.deadUntil&&!this.spawn(p))p.deadUntil=this.time+.5;continue;}
       const input=p.input&&this.time-p.inputAt<.25?p.input:null;
       p.vehicleHitCooldown=Math.max(0,(p.vehicleHitCooldown||0)-RULES.tick);
-      if(p.reloadUntil&&this.time>=p.reloadUntil){p.ammo=RULES.magazine;p.reloadUntil=0;}
+      if(p.reloadUntil&&this.time>=p.reloadUntil){Object.assign(p,reloadRounds(p.ammo,p.reserve,RULES.magazine));p.reloadUntil=0;}
       p.reload=Math.max(0,p.reloadUntil-this.time);
       if(p.pendingInteract){p.pendingInteract=false;if(input)this.toggleVehicle(p);}
       const car=this.world.vehicles.find(c=>c.id===p.carId&&c.driver===p.id&&!c.destroyed);
       if(car){const x=car.x,y=car.y;driveVehicle(car,input,this.world);Object.assign(p,{x:car.x,y:car.y,z:.62,vz:0,angle:car.dir,jetting:false});p.jetFuel=Math.min(100,p.jetFuel+RULES.tick*18);for(const target of this.players.values()){if(target===p||target.hp<=0||target.carId)continue;const damage=vehicleImpactDamage(car,x,y,target);if(damage){target.vehicleHitCooldown=.65;p.protectedUntil=0;this.damagePlayer(p,target,damage);car.speed*=.88;}}continue;}
       movePlayer(p,input,this.world);if(!input)continue;
-      if(input.reload&&!p.reloadUntil&&p.ammo<RULES.magazine)p.reloadUntil=this.time+RULES.reload;
+      if(input.reload&&!p.reloadUntil&&p.ammo<RULES.magazine&&p.reserve>0)p.reloadUntil=this.time+RULES.reload;
       if(!openAt(this.world,p.x,p.y,p.z)&&p.z<.05)this.spawn(p);
       if(input.fire)this.fire(p);
     }
+    for(const p of this.players.values())if(p.hp>0&&!p.carId&&shouldAutoReload(p.ammo,p.reserve,p.reloadUntil>this.time))p.reloadUntil=this.time+RULES.reload;
     this.events=this.events.slice(-24);
   }
-  snapshot(){return {type:'state',phase:this.phase,hostId:this.hostId,round:this.round,arena:this.world.arena,timeOfDay:this.timeOfDay,vehicles:this.world.vehicles.map(c=>({...c})),time:this.time,remaining:this.remaining,waiting:this.players.size<2,results:this.results,events:this.events,players:[...this.players.values()].map(p=>({id:p.id,name:p.name,x:p.x,y:p.y,z:p.z,vz:p.vz,moveVx:p.moveVx,moveVy:p.moveVy,carId:p.carId,jumpHeld:p.jumpHeld,jetFuel:p.jetFuel,jetEmpty:p.jetEmpty,jetting:p.jetting,angle:p.angle,pitch:p.pitch,hp:p.hp,ammo:p.ammo,kills:p.kills,deaths:p.deaths,ack:p.lastSeq,protected:p.protectedUntil>this.time,respawn:Math.max(0,p.deadUntil-this.time),reload:Math.max(0,p.reloadUntil-this.time)}))};}
+  snapshot(){return {type:'state',phase:this.phase,hostId:this.hostId,round:this.round,arena:this.world.arena,timeOfDay:this.timeOfDay,vehicles:this.world.vehicles.map(c=>({...c})),time:this.time,remaining:this.remaining,waiting:this.players.size<2,results:this.results,events:this.events,players:[...this.players.values()].map(p=>({id:p.id,name:p.name,x:p.x,y:p.y,z:p.z,vz:p.vz,moveVx:p.moveVx,moveVy:p.moveVy,carId:p.carId,jumpHeld:p.jumpHeld,crouched:p.crouched,jetFuel:p.jetFuel,jetEmpty:p.jetEmpty,jetting:p.jetting,angle:p.angle,pitch:p.pitch,hp:p.hp,ammo:p.ammo,reserve:p.reserve,kills:p.kills,deaths:p.deaths,ack:p.lastSeq,protected:p.protectedUntil>this.time,respawn:Math.max(0,p.deadUntil-this.time),reload:Math.max(0,p.reloadUntil-this.time)}))};}
 }

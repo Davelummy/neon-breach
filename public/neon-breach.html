@@ -392,7 +392,7 @@
       .status-row { grid-template-columns:42px 1fr 26px;gap:5px; }
       .status-label { font-size:7px; }
       .bottom-right { right:12px;bottom:max(322px,calc(env(safe-area-inset-bottom) + 302px)); }
-      #hud #vehicleButton { right:12px;bottom:max(254px,calc(env(safe-area-inset-bottom) + 234px));max-width:170px; }
+      #hud #vehicleButton { right:max(12px,env(safe-area-inset-right));bottom:max(172px,calc(env(safe-area-inset-bottom) + 160px));width:56px!important;height:56px; }
       #joystickZone { width:126px;height:126px; }
       #joystickKnob { left:41px;top:41px; }
       #weaponButton,#meleeButton { left:calc(max(16px,env(safe-area-inset-left)) + 134px); }
@@ -784,7 +784,7 @@
     @media(pointer:coarse),(max-width:760px) {
       #hud #scoreBox,#hud #missionComms,#hud #announcement,#hud #weaponSlots,#hud #weaponName,#objectiveLabel,#hud #missionLabel,#hud #objectiveDistance,#hud #combo { display:none!important; }
       #objectiveBox { top:max(12px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left));right:76px;width:auto;max-width:420px;padding:10px 12px;transform:none; }
-      #missionInstruction { font-size:12px;line-height:1.35;margin:0; }
+      #missionInstruction { font-size:12px;line-height:1.35;margin:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden; }
       #waveTrack { display:none; }
       #pauseButton { top:max(12px,env(safe-area-inset-top));left:auto;bottom:auto;right:max(12px,env(safe-area-inset-right));width:48px;height:44px; }
       #hud #radarWrap{display:block!important;top:124px;right:max(12px,env(safe-area-inset-right));width:80px;height:80px;padding:3px;pointer-events:none}
@@ -800,7 +800,7 @@
       #fireButton { right:max(18px,env(safe-area-inset-right));bottom:max(24px,env(safe-area-inset-bottom));width:72px;height:72px; }
       #reloadButton { right:max(104px,calc(env(safe-area-inset-right) + 104px));bottom:max(24px,env(safe-area-inset-bottom));width:48px;height:48px; }
       #jetButton { right:max(28px,calc(env(safe-area-inset-right) + 28px));bottom:max(110px,calc(env(safe-area-inset-bottom) + 110px));width:52px;height:52px; }
-      #vehicleButton { right:max(12px,env(safe-area-inset-right));top:auto;bottom:max(230px,calc(env(safe-area-inset-bottom) + 230px));max-width:200px; }
+      #vehicleButton { right:max(12px,env(safe-area-inset-right));top:auto;bottom:max(246px,calc(env(safe-area-inset-bottom) + 246px));max-width:200px; }
       #message { top:auto;bottom:max(300px,calc(env(safe-area-inset-bottom) + 300px));font-size:10px;max-width:85vw; }
       .title-hero h1 { font-size:clamp(36px,10vw,58px); }
       .menu-panel { padding:20px; }
@@ -827,7 +827,7 @@
       #message { bottom:124px; }
     }
     @media(min-width:1800px) { #objectiveBox { max-width:520px; } .menu-panel { font-size:16px; } }
-    @media(max-height:440px) and (pointer:coarse){#hud #radarWrap{left:max(12px,env(safe-area-inset-left));right:auto;top:82px;width:72px;height:72px}body.in-vehicle #hud #radarWrap{left:calc(50% - 36px)}}
+    @media(max-height:440px) and (pointer:coarse){#hud #radarWrap{left:max(12px,env(safe-area-inset-left));right:auto;top:82px;width:72px;height:72px}#gameRadio{width:180px}@media(max-width:600px){#gameRadio{width:150px}}body.in-vehicle #hud #objectiveBox{right:calc(max(12px,env(safe-area-inset-right)) + 140px)}body.in-vehicle #hud #radarWrap{left:auto;right:calc(max(12px,env(safe-area-inset-right)) + 56px);top:max(12px,env(safe-area-inset-top))}}
     @media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important;scroll-behavior:auto!important; } }
   </style>
   <style>
@@ -847,6 +847,24 @@
     #adsButton { right:max(104px,calc(env(safe-area-inset-right) + 104px));bottom:max(110px,calc(env(safe-area-inset-bottom) + 110px));width:52px;height:52px; }
     body.in-vehicle #adsButton { display:block; }
     .setting-row label { line-height:1.4; }
+    #movementActions{position:absolute;left:max(16px,env(safe-area-inset-left));bottom:max(170px,calc(env(safe-area-inset-bottom) + 170px));display:flex;gap:8px;pointer-events:auto}
+    #movementActions .touch-btn{position:static;width:60px;height:52px;font-size:10px;touch-action:manipulation}
+    #movementActions [aria-pressed="true"]{color:#03100f;background:var(--cyan);border-color:var(--cyan)}
+    body.in-vehicle #movementActions{display:none}
+    @media(pointer:coarse) and (max-width:360px) and (min-height:441px){#movementActions{bottom:max(152px,calc(env(safe-area-inset-bottom) + 152px))}#movementActions .touch-btn{width:52px;height:46px}}
+    /* Readouts live at the screen edges so RUN/CROUCH and the drive icon never push them into the play view. */
+    @media(pointer:coarse) and (orientation:portrait){body:not(.in-vehicle) #hud .bottom-left{top:max(82px,calc(env(safe-area-inset-top) + 82px));bottom:auto;left:max(10px,env(safe-area-inset-left))}body.in-vehicle #hud .bottom-left{bottom:max(160px,calc(env(safe-area-inset-bottom) + 160px))}body #hud .bottom-right{top:max(212px,calc(env(safe-area-inset-top) + 212px));bottom:auto;right:max(12px,env(safe-area-inset-right));max-width:calc(30vw - 12px)}}
+    @media(pointer:coarse) and (orientation:portrait) and (max-width:340px){body #hud .bottom-left{width:84px}}
+    /* Pop-up messages sit in the upper band on phones, clear of the reticle and the vehicle ahead. */
+    @media(pointer:coarse) and (orientation:portrait) and (max-width:600px){body #hud #message{top:max(140px,calc(env(safe-area-inset-top) + 140px));bottom:auto;left:max(8px,env(safe-area-inset-left));transform:none;max-width:calc(100% - 118px)}}
+    @media(pointer:coarse) and (max-height:440px){body #hud #message{top:max(80px,calc(env(safe-area-inset-top) + 80px));bottom:auto;left:240px;transform:none;max-width:calc(100% - 390px)}}
+    body #hud #message{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+    @media(pointer:coarse) and (orientation:portrait) and (max-width:600px){body.in-vehicle #hud #message{top:max(128px,calc(env(safe-area-inset-top) + 128px))}}
+    @media(pointer:coarse) and (orientation:landscape) and (min-height:441px){body #hud #message{top:max(84px,calc(env(safe-area-inset-top) + 84px));bottom:auto}}
+    @media(pointer:coarse) and (max-height:440px) and (max-width:600px){body #hud #objectiveBox{max-width:260px}body #hud #message{top:max(12px,env(safe-area-inset-top));left:280px;max-width:calc(100% - 430px)}}
+    @media(pointer:coarse) and (orientation:landscape) and (min-height:441px){body:not(.in-vehicle) #hud .bottom-left{bottom:max(238px,calc(env(safe-area-inset-bottom) + 238px))}}
+    @media(pointer:coarse) and (max-height:440px) and (max-width:600px){body:not(.in-vehicle) #hud .bottom-left{width:72px}}
+    @media(pointer:coarse) and (max-height:440px){#movementActions{left:164px;bottom:max(20px,env(safe-area-inset-bottom))}#movementActions .touch-btn{width:56px;height:48px}body:not(.in-vehicle) #hud .bottom-left{top:max(82px,calc(env(safe-area-inset-top) + 82px));bottom:auto;left:calc(max(12px,env(safe-area-inset-left)) + 84px)}}
     #menuRoot button:focus-visible,#menuRoot select:focus-visible,#menuRoot input:focus-visible { outline:2px solid var(--cyan);outline-offset:3px; }
     @media(max-width:760px),(pointer:coarse) {
       #hud #weaponName { display:block!important;font-size:10px;max-width:140px; }
@@ -857,7 +875,7 @@
       #hud .bottom-right { max-width:145px; }
     }
     @media(max-width:360px) { #hud .bottom-left { left:10px;width:130px; } #hud .bottom-right { right:10px;max-width:135px; } }
-    @media(pointer:coarse) and (max-height:440px) { #hud .bottom-left { left:164px;width:100px; }#hud .status-row { grid-template-columns:30px 1fr 20px; }#hud .bottom-right { right:174px;max-width:130px; }#vehicleButton { left:50%;right:auto;bottom:140px;transform:translateX(-50%);max-width:180px; } }
+    @media(pointer:coarse) and (max-height:440px) { #hud .bottom-left { left:164px;width:100px; }#hud .status-row { grid-template-columns:30px 1fr 20px; }#hud .bottom-right { right:174px;max-width:130px; }#hud #vehicleButton,#vehicleButton { left:auto;right:calc(max(12px,env(safe-area-inset-right)) + 58px);bottom:max(172px,calc(env(safe-area-inset-bottom) + 160px));transform:none;width:56px!important;height:56px; } }
     @media(max-height:300px) { .screen { padding:12px; }.menu-panel { padding:12px; } }
     #modalScreen::before,#modalScreen::after { display:none; }
     #modalScreen { height:100dvh; }
@@ -961,6 +979,7 @@
         <button id="multiplayerButton" class="secondary" type="button">Multiplayer</button>
         <button class="secondary" data-goto="screenRanks">Leaderboard</button>
         <div id="mainAccount" hidden><span id="mainAccountName"></span><button id="mainLogout" class="secondary" type="button">Log out</button></div>
+        <div class="player-badge" data-player-badge aria-label="Your operative badge"></div>
         <p id="accountActionStatus" role="status" style="margin:0;font-size:13px;text-align:center"></p>
         <details class="quiet-options"><summary>More</summary>
         <button class="secondary" data-goto="screenHow">How to play</button>
@@ -1154,6 +1173,8 @@
         <div id="campaignHistory" class="scroll-panel"></div>
         <div id="bestScoreTitle" class="micro" style="margin-top:10px">Best // 000000</div>
         <div class="campaign-head" style="margin-top:16px"><div class="micro">Unlocks</div><span id="careerStatus" class="micro">0 elims</span></div>
+        <div class="player-badge" data-player-badge aria-label="Your operative badge"></div>
+        <p class="muted">Earn badge XP through eliminations, mission victories, accurate shooting and improved high scores. Badges do not change weapon power.</p>
         <div id="arsenalCards" aria-label="Weapon collection"></div>
         <div id="arsenalRows" class="scroll-panel"></div>
         <div class="campaign-head" style="margin-top:16px"><div class="micro">Medals</div></div>
@@ -1225,6 +1246,7 @@
       <section id="gunShopPanel" hidden aria-label="Gun store"><p id="shopBalance"></p><div id="shopWeapons" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px"></div><p id="shopStatus" role="status"></p></section>
       <div id="resultRank"></div>
       <div id="resultGrid" class="result-grid hidden">
+        <div id="resultBadge" class="player-badge" style="grid-column:1/-1" aria-live="polite"></div>
         <div><b id="resultScore">0</b><span>SCORE</span></div>
         <div><b id="resultKills">0</b><span>ELIMS</span></div>
         <div><b id="resultAccuracy">0%</b><span>ACCURACY</span></div>
@@ -1309,12 +1331,14 @@
     <button id="jetButton" class="touch-btn" aria-label="Hold to jump and fly">JET</button>
     <button id="pauseButton" class="touch-btn" aria-label="Pause game">Ⅱ</button>
     <button id="touchMoreButton" class="touch-btn" aria-label="More gameplay actions" aria-controls="touchExtras" aria-expanded="false">MORE</button>
+    <div id="movementActions" aria-label="Movement actions">
+      <button id="sprintButton" class="touch-btn" aria-label="Toggle run" aria-pressed="false">RUN</button>
+      <button id="crouchButton" class="touch-btn" aria-label="Toggle crouch; press while running to slide" aria-pressed="false">CROUCH</button>
+    </div>
     <div id="touchExtras" hidden>
     <button id="nightVisionButton" class="touch-btn" aria-label="Toggle night vision" aria-pressed="false">NVG OFF</button>
     <button id="weaponButton" class="touch-btn" aria-label="Switch to next unlocked weapon">GUN</button>
     <button id="meleeButton" class="touch-btn" aria-label="Melee takedown">MELEE</button>
-    <button id="sprintButton" class="touch-btn" aria-label="Hold to sprint">RUN</button>
-    <button id="crouchButton" class="touch-btn" aria-label="Toggle crouch; press while running to slide" aria-pressed="false">CROUCH</button>
     <button id="screenModeButton" class="touch-btn" aria-label="Try landscape fullscreen">SCREEN</button>
     <button id="lockButton" class="touch-btn active" aria-label="Toggle auto lock" aria-pressed="true">LOCK<br>ON</button>
     </div>

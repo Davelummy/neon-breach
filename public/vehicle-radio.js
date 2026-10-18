@@ -22,7 +22,7 @@ export function cachedStations(storage,now=Date.now()){
 }
 export async function discoverStations({fetcher=globalThis.fetch,storage,now=Date.now()}={}){
   const cached=cachedStations(storage,now);if(cached.length)return cached;
-  // At most three timed metadata requests, only on explicit Tune live / Retry.
+  // At most three timed metadata requests: on the first drive (unless radio is Off) or on Tune / Retry.
   const offset=Math.floor(Math.random()*MIRRORS.length);
   for(let i=0;i<MIRRORS.length;i++){
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);

@@ -78,11 +78,32 @@ Driving: left stick steers and drives, R2 accelerates, L2 brakes, X boosts,
 D-pad left/right changes radio station, up tunes/plays, down turns the radio off; L1/R1 lowers/raises radio volume,
 Circle gets out.
 
-Vehicle radio keeps one media element primed by your first click, tap or key press;
-subsequent station, playback and volume controls work from the pad. D-pad up also
-retries unavailable/blocked playback. Browser-level sound denial cannot be bypassed:
-if prompted, press Enter or Play once to grant audio permission. Radio stops on exit
-or pause; discovery and stream failures do not trigger an automatic retry loop.
+Vehicle radio keeps one media element primed by your first click, tap or key press
+(phones grant this when the finger lifts). The first drive finds Nigerian stations and
+starts one automatically unless you chose Off in Settings; Off from the in-car controls
+lasts for that session only. Station, playback and volume controls then work from the pad,
+and D-pad up retries unavailable or blocked playback. Browser-level sound denial cannot be
+bypassed: if prompted, press Enter or Play once. Radio stops on exit or pause; discovery and
+stream failures do not trigger an automatic retry loop.
+
+### Touch
+
+- Left thumb area: move stick, with **RUN** and **CROUCH** toggles beside or above it (no menu needed).
+- Right thumb area: Fire, Aim, Jet, Reload; the round drive / exit icon docks next to them.
+- Minimap, vitals and pop-up messages stay at the screen edges so the centre of the view is clear.
+
+### Ammunition
+
+Empty magazines reload automatically, keeping held fire going, until your reserve runs out;
+each gun keeps its own reload time. Ammo boxes refill the reserve. Multiplayer uses one
+standard carbine with finite reserves that refill on respawn.
+
+### Badges
+
+Badge XP comes from eliminations, mission or round victories, shooting accuracy and beating
+your best score. Levels run from Recruit to Legend (level 50). Badges are saved on this device
+per account (guest progress moves to your account when you sign up), are cosmetic and never
+change weapon power.
 
 ### Keyboard and mouse
 
@@ -95,7 +116,7 @@ or pause; discovery and stream failures do not trigger an automatic retry loop.
 - R: Reload
 - 1–4 or mouse wheel: Change weapon
 - E: Drive or exit a vehicle (N tunes / changes the vehicle radio)
-- C (toggle) or Ctrl (hold): Crouch · while sprinting, slide
+- C (toggle) or Ctrl (hold): Crouch · while sprinting, slide (also in multiplayer)
 - F: Close-range finisher
 - T: Toggle auto-lock
 - M: Toggle audio
@@ -121,6 +142,7 @@ npm start
 ```bash
 npm test       # node:test suite — mission/enemy data invariants, save validation, path safety
 npm run qa     # headless gameplay smoke (chrome-headless-shell)
+npm run qa:hud # HUD obstruction check: phones, tablets and desktop, on foot and driving
 npm run verify # test + qa
 ```
 

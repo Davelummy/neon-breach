@@ -33,6 +33,10 @@ try {
   browser = await puppeteer.launch({ executablePath, timeout: 60000, args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio'] });
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
+  // The public radio directory stays offline until the radio fixture below: first-drive
+  // auto-tune must fail honestly here and never depend on the internet.
+  let radioFixture=null;await page.setRequestInterception(true);
+  page.on('request',request=>{const url=new URL(request.url());if(radioFixture)return radioFixture(request,url);if(url.hostname.endsWith('.api.radio-browser.info'))return request.respond({status:503,contentType:'text/plain',body:'offline'});return request.continue();});
   await page.bringToFront();
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(String(error?.message || error)));
@@ -165,6 +169,25 @@ try {
   const supplies=await page.evaluate(()=>({health:window.__NEON_QA__.supplyTest('health'),ammo:window.__NEON_QA__.supplyTest('ammo'),gun:window.__NEON_QA__.supplyTest('weapon')}));
   check('health and ammo collect in gameplay',supplies.health.health===78&&supplies.ammo.reserve>0);
   check('gun pickup equips LMG',supplies.gun.weapon==='lmg');
+  // Finite auto-reload: rounds move from reserve to magazine, held fire continues, and each gun keeps its own reload time.
+  const reloads=await page.evaluate(async()=>{
+    const q=window.__NEON_QA__,wait=ms=>new Promise(r=>setTimeout(r,ms)),out={};
+    q.setAmmo(0,5);await wait(80);out.autoStarts=q.ammoState().reloading;await wait(q.ammoState().reloadTime*1000+300);let a=q.ammoState();out.partial=a.ammo===5&&a.reserve===0&&!a.reloading;
+    q.setAmmo(0,0);await wait(150);a=q.ammoState();out.emptyStays=!a.reloading&&a.ammo===0;
+    q.supplyTest('ammo');await wait(150);out.pickupReloads=q.ammoState().reloading&&q.ammoState().reserve>0;await wait(q.ammoState().reloadTime*1000+300);out.pickupFills=q.ammoState().ammo>0;
+    const times=new Map();for(let i=0;i<8;i++){q.equipWeapon(i);a=q.ammoState();if(a.reloadTime===a.weaponReload)times.set(a.weapon,a.reloadTime);}
+    out.distinct=new Set(times.values()).size===times.size&&times.size>=2;out.times=Object.fromEntries(times);
+    return out;
+  });
+  check('empty magazine reloads automatically from a partial reserve',reloads.autoStarts&&reloads.partial,JSON.stringify(reloads));
+  check('no reload or phantom rounds once reserves are spent',reloads.emptyStays);
+  check('ammo pickup with an empty magazine auto-reloads',reloads.pickupReloads&&reloads.pickupFills);
+  check('each unlocked gun keeps its own reload duration',reloads.distinct,JSON.stringify(reloads.times));
+  await page.evaluate(()=>{window.__NEON_QA__.equipWeapon(0);window.__NEON_QA__.setAmmo(3,60);});
+  const heldStart=await page.evaluate(()=>window.__NEON_QA__.ammoState());
+  await page.keyboard.down('ShiftLeft');await new Promise(r=>setTimeout(r,heldStart.reloadTime*1000+1200));
+  const held=await page.evaluate(()=>window.__NEON_QA__.ammoState());await page.keyboard.up('ShiftLeft');
+  check('held fire continues through an automatic reload',held.shots>heldStart.shots+3&&held.reserve<60,JSON.stringify({heldStart,held}));
   check('mission instruction stays visible',await page.$eval('#missionInstruction',e=>{
     const rect=e.getBoundingClientRect(),style=getComputedStyle(e);
     return /^1\/5 · Reach .+ · follow the marker · .+ · \d+m$/.test(e.textContent)
@@ -211,7 +234,7 @@ try {
     await page.keyboard.press('e');
     check(`fleet vehicle ${index} boards without mission lock`,await page.evaluate(i=>window.__NEON_QA__.snapshot().carIndex===i,index));
     if(index===7){
-      check('bus shows vehicle-only live-radio controls',await page.$eval('#gameRadio',e=>!e.hidden&&e.textContent.includes('Tune Nigerian radio')));
+      await waitForState(page,()=>{const e=document.getElementById('gameRadio');return !e.hidden&&e.textContent.includes('Tune Nigerian radio');});check('bus shows vehicle-only live-radio controls after an offline auto-tune',true);
       const camera=await page.evaluate(()=>window.__NEON_QA__.vehicleCamera());
       check('bus chase camera clears the body and roof',camera.clearance>.4&&camera.eyeHeight>camera.roofHeight,JSON.stringify(camera));
       if(process.env.SMOKE_SHOT){await new Promise(resolve=>setTimeout(resolve,300));await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-bus-radio.png')});}
@@ -222,10 +245,10 @@ try {
   // Deterministic radio transport fixture: real HTMLAudioElement playback, no
   // live broadcast dependency, no public directory requests or paid services.
   const wav=Buffer.alloc(44+8000*2*30);wav.write('RIFF',0);wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(8000,24);wav.writeUInt32LE(16000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(wav.length-44,40);
-  await page.setRequestInterception(true);
-  const radioTransport=async request=>{const url=new URL(request.url());if(url.hostname.endsWith('.api.radio-browser.info'))await request.respond({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:JSON.stringify(['one','two'].map(id=>({stationuuid:id,name:`QA Abuja ${id}`,countrycode:'NG',state:'Abuja',lastcheckok:1,hls:0,codec:'MP3',url_resolved:`https://radio-fixture.example.test/${id}.wav`,homepage:'https://example.test/'})))});else if(url.hostname==='radio-fixture.example.test')await request.respond({status:200,contentType:'audio/wav',headers:{'access-control-allow-origin':'*'},body:wav});else await request.continue();};
-  page.on('request',radioTransport);
-  await page.evaluate(()=>window.__NEON_QA__.besideVehicle(0));await page.keyboard.press('e');
+  radioFixture=async (request,url)=>{if(url.hostname.endsWith('.api.radio-browser.info'))await request.respond({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:JSON.stringify(['one','two'].map(id=>({stationuuid:id,name:`QA Abuja ${id}`,countrycode:'NG',state:'Abuja',lastcheckok:1,hls:0,codec:'MP3',url_resolved:`https://radio-fixture.example.test/${id}.wav`,homepage:'https://example.test/'})))});else if(url.hostname==='radio-fixture.example.test')await request.respond({status:200,contentType:'audio/wav',headers:{'access-control-allow-origin':'*'},body:wav});else await request.continue();};
+  // The Settings Off choice above is honoured; a player who has not chosen Off gets radio on the first drive.
+  await page.evaluate(()=>{localStorage.removeItem('neon-breach-live-radio');window.__NEON_QA__.besideVehicle(0);});await page.keyboard.press('e');
+  await waitForState(page,()=>window.__NEON_QA__.radioStatus().state==='playing');check('first drive auto-tunes and plays live radio without pressing Tune',true);
   await page.evaluate(()=>{window.__radioPad={index:0,connected:true,mapping:'standard',id:'DualSense Wireless Controller',axes:[0,0,0,0],buttons:Array.from({length:17},()=>({pressed:false,value:0}))};Object.defineProperty(navigator,'getGamepads',{configurable:true,value:()=>[window.__radioPad]});});
   const radioPad=async button=>{await page.evaluate(button=>window.__radioPad.buttons[button]={pressed:true,value:1},button);await new Promise(r=>setTimeout(r,150));await page.evaluate(button=>window.__radioPad.buttons[button]={pressed:false,value:0},button);await new Promise(r=>setTimeout(r,150));};
   await radioPad(12);await waitForState(page,()=>window.__NEON_QA__.radioStatus().state==='playing');
@@ -240,7 +263,7 @@ try {
   check('radio controller mapping is visible',await page.$eval('#gameRadioContext',el=>el.textContent.includes('L1/R1')));
   check('exit ring is amber',await page.$eval('#vehicleButton',el=>getComputedStyle(el).borderTopColor==='rgb(255, 187, 85)'));
   await page.keyboard.press('e');check('exit stops controller-started radio',await page.evaluate(()=>window.__NEON_QA__.radioStatus().state==='stopped'));
-  await page.evaluate(()=>{HTMLMediaElement.prototype.play=window.__radioPlay;delete navigator.getGamepads;delete window.__radioPad;delete window.__radioPlay;});page.off('request',radioTransport);await page.setRequestInterception(false);
+  await page.evaluate(()=>{HTMLMediaElement.prototype.play=window.__radioPlay;delete navigator.getGamepads;delete window.__radioPad;delete window.__radioPlay;});radioFixture=null;
   check('outer district taxi can be approached',await page.evaluate(()=>window.__NEON_QA__.besideVehicle(5)));
   await page.keyboard.press('e');
   const driveStart=await page.evaluate(()=>window.__NEON_QA__.worldSnapshot().cars[5]);

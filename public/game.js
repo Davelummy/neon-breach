@@ -1,4 +1,6 @@
 import {renderWeaponCards} from './weapon-cards.js';
+import {shouldAutoReload,reloadRounds} from './ammo-rules.js';
+import {recordBadgeRun,renderBadge,mergeBadges} from './player-progression.js';
 import { fetchJson, startCommunity, publishResult, resultUrl, downloadScorecard } from './community.js';
 import {accountUser,isGuest,initializeAccounts,showAccountGate} from './accounts.js';
 import {drawCombatRadar,selectConnectedGamepad} from './combat-interface.js';
@@ -84,12 +86,16 @@ let accountCheckPending=true;
     let audio = null;
     try{const savedArena=localStorage.getItem('neon-breach-arena');if(ARENAS.some(a=>a.id===savedArena))state.arenaId=savedArena;}catch{}
     let selectedLoadout=0, radioStation=LIVE_STATIONS[0]?.id||'off', radioVolume=.5;
-    try{selectedLoadout=Math.max(0,Math.min(WEAPONS.length-1,Number(localStorage.getItem('neon-breach-loadout'))||0));radioStation=localStorage.getItem('neon-breach-live-radio')||LIVE_STATIONS[0]?.id||'off';radioVolume=Math.max(0,Math.min(1,Number(localStorage.getItem('neon-breach-radio-volume')??.5)));}catch{}
+    try{selectedLoadout=Math.max(0,Math.min(WEAPONS.length-1,Number(localStorage.getItem('neon-breach-loadout'))||0));if(!localStorage.getItem('neon-breach-radio-pref-v2')){if(localStorage.getItem('neon-breach-live-radio')==='off')localStorage.removeItem('neon-breach-live-radio');localStorage.setItem('neon-breach-radio-pref-v2','1');}radioStation=localStorage.getItem('neon-breach-live-radio')||LIVE_STATIONS[0]?.id||'off';radioVolume=Math.max(0,Math.min(1,Number(localStorage.getItem('neon-breach-radio-volume')??.5)));}catch{}
     // Directory-backed selections are restored after explicit tuning.
     selectedLoadout=Number.isFinite(selectedLoadout)?Math.floor(selectedLoadout):0;
     if(!Number.isFinite(radioVolume))radioVolume=.5;
     const campaignCloud = { id:null, active:null, records:[], syncing:false, saveTimer:12, remoteBest:0, pendingStatus:null, offline:false };
     const LOCAL_CAMPAIGN_KEY = 'neon-breach-campaign-v1';
+    let badgeRunId='';
+    function refreshBadges(){for(const el of document.querySelectorAll('[data-player-badge]'))renderBadge(el,interfaceStorage,accountUser()?.id);}
+    addEventListener('neon-account-changed',refreshBadges);
+    addEventListener('storage',event=>{if(event.key?.startsWith('neon-badge:'))refreshBadges();});
     function localCampaignState(){try{const value=JSON.parse(localStorage.getItem(LOCAL_CAMPAIGN_KEY)||'null');return value&&typeof value==='object'&&(!value.owner||value.owner===accountUser()?.id)?value:null;}catch{return null;}}
     function writeLocalCampaign(status,payload){
       const local=localCampaignState()||{active:null,records:[],career:{kills:0,takedowns:0,roadkills:0,victories:0},best_score:0};
@@ -656,7 +662,7 @@ let accountCheckPending=true;
       const loadout=$('loadoutWeapon');
       if(loadout){loadout.replaceChildren();WEAPONS.forEach((weapon,index)=>{const option=document.createElement('option');option.value=String(index);option.textContent=`${weapon.name} · ${weapon.mag} rounds`;loadout.append(option);});loadout.value=String(selectedLoadout);loadout.addEventListener('change',()=>{selectStartingWeapon(Number(loadout.value));loadout.value=String(selectedLoadout);});}
       const station=$('radioStation'),musicVolume=$('radioVolume');
-      if(station){station.replaceChildren();for(const id of radioStations){const option=document.createElement('option');option.value=id;option.textContent=radioNames[id];station.append(option);}station.value=radioStation;station.addEventListener('change',()=>selectRadioStation(station.value));}
+      if(station){station.replaceChildren();for(const id of radioStations){const option=document.createElement('option');option.value=id;option.textContent=radioNames[id];station.append(option);}station.value=radioStation;station.addEventListener('change',()=>selectRadioStation(station.value,{settings:true}));}
       updateRadioLabel();
       $('radioPrevious')?.addEventListener('click',()=>cycleRadioStation(-1));
       $('radioNext')?.addEventListener('click',()=>cycleRadioStation(1));
@@ -1022,6 +1028,7 @@ let accountCheckPending=true;
       clearMenuFocus();
       $('menuRoot')?.classList.add('hidden'); $('modalScreen').classList.add('hidden'); $('hud').classList.remove('hidden');
       if(coarsePointer)$('touchControls').classList.remove('hidden'); else{pointerWanted=true;requestLock();showMessage('WASD move · click to look');}
+      badgeRunId=`campaign:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
       const restored=saved&&restoreCheckpoint(saved.checkpoint,state,player,{owner:accountUser()?.id,width:MAP_W,height:MAP_H,enemyTypes:ENEMY_TYPES,weaponCount:WEAPONS.length,stageCount:stages.length});
       if(window.__NEON_QA__)state.qaResumeInfo={hasCheckpoint:!!saved?.checkpoint,restored:!!restored,stage:saved?.checkpoint?.world?.missionStage??null};
       if(restored){updateNightVision();showMessage('EXACT LOCAL RESUME · POSITION AND WORLD RESTORED');}
@@ -1056,11 +1063,11 @@ let accountCheckPending=true;
     // Retain the same HTMLAudioElement across stations/vehicles. Browser media
     // permission is per element (not inherited from the game's AudioContext).
     const primeRadio=event=>{if(!event.isTrusted)return;if(liveRadio.state==='blocked'&&player.carIndex>=0&&state.mode==='playing')startGameplayRadio();else liveRadio.prime();};
-    addEventListener('pointerdown',primeRadio,{capture:true});
-    addEventListener('keydown',primeRadio,{capture:true});
+    // Phones grant media permission on finger lift (pointerup/touchend/click), not on press.
+    for(const type of ['pointerdown','pointerup','touchend','click','keydown'])addEventListener(type,primeRadio,{capture:true});
     let radioStations=['off',...liveRadio.stations.map(station=>station.id)];
     let radioNames=Object.fromEntries([['off','Radio off'],...liveRadio.stations.map(station=>[station.id,station.name])]);
-    let radioDiscovering=false;
+    let radioDiscovering=false,radioSessionOff=false;
     async function tuneLiveRadio(){
       if(player.carIndex<0||state.mode!=='playing'||radioDiscovering)return;
       if(!liveRadio.stations.length){
@@ -1075,6 +1082,8 @@ let accountCheckPending=true;
       // Playback gate is rechecked after metadata loading: never play on foot.
       selectRadioStation(radioStation);updateRadioLabel();
     }
+    // First drive with no saved stations: discover and start one, unless the player chose Off.
+    function autoTuneRadio(){let choice=null;try{choice=localStorage.getItem('neon-breach-live-radio');}catch{}if(choice!=='off'&&!radioSessionOff&&(!liveRadio.stations.length||radioStation==='off')&&!radioDiscovering)void tuneLiveRadio();}
     function updateRadioLabel(){
       const car=state.cars?.[player.carIndex],visible=!!car&&state.mode==='playing',status=liveRadio.status();
       $('gameRadio').hidden=!visible;document.body.classList.toggle('in-vehicle',!!car);
@@ -1089,7 +1098,8 @@ let accountCheckPending=true;
       $('radioPlay').disabled=radioDiscovering;$('radioPlay').hidden=status.configured&&!['off','blocked','unavailable'].includes(status.state);$('radioPlay').textContent=status.configured?'▶':'Tune';$('radioPlay').setAttribute('aria-label',status.configured?'Play selected live station':'Discover Nigerian live radio stations');
       $('gameRadio').setAttribute('aria-label',car?`${car.name} live radio controls`:'Vehicle live radio controls');
     }
-    function selectRadioStation(station){if(!radioStations.includes(station))return;radioStation=station;try{localStorage.setItem('neon-breach-live-radio',station);}catch{}startGameplayRadio();}
+    // Off from in-car controls lasts for this session; only the Settings picker remembers Off across visits.
+    function selectRadioStation(station,{settings=false}={}){if(!radioStations.includes(station))return;radioStation=station;radioSessionOff=station==='off'&&!settings;try{if(station!=='off'||settings)localStorage.setItem('neon-breach-live-radio',station);}catch{}startGameplayRadio();}
     function changeRadioVolume(delta){radioVolume=Math.round(Math.max(0,Math.min(1,radioVolume+delta))*100)/100;try{localStorage.setItem('neon-breach-radio-volume',String(radioVolume));}catch{}$('radioVolume').value=String(radioVolume*100);liveRadio.setVolume(radioVolume*(state.masterVolume??.28),state.muted);updateRadioLabel();showMessage(`RADIO VOLUME ${Math.round(radioVolume*100)}%`);}
     function cycleRadioStation(direction){if(player.carIndex<0||state.mode!=='playing')return;if(!liveRadio.stations.length){void tuneLiveRadio();return;}selectRadioStation(radioStations[(radioStations.indexOf(radioStation)+direction+radioStations.length)%radioStations.length]);}
     async function switchScreenMode(){
@@ -1131,6 +1141,7 @@ let accountCheckPending=true;
     }
 
     function endGame(victory=false){
+      if(state.mode==='victory'||state.mode==='gameover')return;
       audio?.jetThrust?.(false);player.wasJetting=false;
       $('pausedMission').hidden=true;
       audio?.stopRadio();liveRadio.stop();$('gameRadio').hidden=true;
@@ -1142,6 +1153,8 @@ let accountCheckPending=true;
       let finalScore=player.score;
       if(victory&&state.daily?.rules?.speedBonus&&state.totalTime<420){const bonus=Math.round(finalScore*.12);finalScore+=bonus;player.score=finalScore;}
       const isBest=saveBestScore(finalScore);
+      const badge=recordBadgeRun(interfaceStorage,accountUser()?.id,{id:badgeRunId,seconds:state.totalTime,kills:player.kills,score:finalScore,shots:player.shots,hits:player.hits,victory});
+      renderBadge($('resultBadge'),interfaceStorage,accountUser()?.id,badge);refreshBadges();
       const medals=evaluateMedals({
         victory, healthPct:player.health/player.maxHealth, accuracy:accuracyRatio, comboPeak:state.comboPeak,
         roadkills:state.roadkills, totalTime:state.totalTime, takedowns:state.takedowns, damageTaken:state.damageTaken
@@ -1375,7 +1388,7 @@ let accountCheckPending=true;
         if(!exit){showMessage('EXIT BLOCKED · MOVE THE VEHICLE INTO OPEN SPACE');return;}player.x=exit.x;player.y=exit.y;player.z=GROUND_HEIGHT;player.carIndex=-1;car.occupied=false;car.speed=0;startGameplayRadio();audio?.vehicle();showMessage(`EXITED ${car.name}`);rumble(.12,.18,60);return;
       }
       const nearest=nearbyVehicle();
-      if(nearest<0){showMessage('MOVE BESIDE A VEHICLE · E / HOLD □ / DRIVE BUTTON');return;}const car=state.cars[nearest];car.occupied=true;player.carIndex=nearest;player.x=car.x;player.y=car.y;player.z=.62;player.vz=0;player.grounded=true;player.dir=car.dir;startGameplayRadio();$('touchExtras').hidden=true;$('touchMoreButton').setAttribute('aria-expanded','false');audio?.vehicle();showMessage(`${car.name} · E / ○ EXIT`);rumble(.16,.25,90);
+      if(nearest<0){showMessage(state.touch&&!activeGamepad?'MOVE BESIDE A VEHICLE · THEN TAP DRIVE':'MOVE BESIDE A VEHICLE · E / HOLD □ / DRIVE BUTTON');return;}const car=state.cars[nearest];car.occupied=true;player.carIndex=nearest;input.sprint=false;player.crouchToggle=false;player.x=car.x;player.y=car.y;player.z=.62;player.vz=0;player.grounded=true;player.dir=car.dir;liveRadio.prime();startGameplayRadio();autoTuneRadio();$('touchExtras').hidden=true;$('touchMoreButton').setAttribute('aria-expanded','false');audio?.vehicle();showMessage(`${car.name} · ${state.touch&&!activeGamepad?'TAP EXIT TO GET OUT':'E / ○ EXIT'}`);rumble(.16,.25,90);
     }
     function nearbyVehicle(){let nearest=-1,best=1.6;if(Math.abs(player.z-GROUND_HEIGHT)>.85)return -1;for(let i=0;i<state.cars.length;i++){const car=state.cars[i],distance=vehicleDistance(car,player.x,player.y);if(car.destroyed||car.occupied||distance>=best)continue;if(!lineOfSight(player.x,player.y,car.x,car.y,player.z))continue;const mx=(player.x+car.x)/2,my=(player.y+car.y)/2;if(coverAt(mx,my))continue;best=distance;nearest=i;}return nearest;}
 
@@ -1592,21 +1605,26 @@ let accountCheckPending=true;
         }
       }
       if(player.comboTimer>0){player.comboTimer-=dt;if(player.comboTimer<=0){player.combo=1;$('combo').classList.remove('show');}}
-      if(player.reloading){player.reloadTimer-=dt;if(player.reloadTimer<=0){const need=player.magSize-player.ammo,take=Math.min(need,player.reserve);player.ammo+=take;player.reserve-=take;player.reloading=false;player.spread=Math.min(.1,player.spread+.02);audio?.reloadComplete?.();showMessage('MAGAZINE SYNCHRONIZED');}}
+      if(player.reloading){player.reloadTimer-=dt;if(player.reloadTimer<=0){Object.assign(player,reloadRounds(player.ammo,player.reserve,player.magSize));player.reloading=false;player.spread=Math.min(.1,player.spread+.02);audio?.reloadComplete?.();showMessage('MAGAZINE SYNCHRONIZED');}}
+      if(player.carIndex<0&&shouldAutoReload(player.ammo,player.reserve,player.reloading))reload(true);
+      syncMovementButtons();
       if(player.carIndex>=0){const instantVx=(player.x-previousX)/Math.max(.001,dt),instantVy=(player.y-previousY)/Math.max(.001,dt);player.moveVx+=(instantVx-player.moveVx)*Math.min(1,dt*9);player.moveVy+=(instantVy-player.moveVy)*Math.min(1,dt*9);}
       if(player.carIndex<0&&(input.fire||input.gamepadFire)&&!player.reloading&&player.fireCooldown<=0)shoot();
     }
 
-    function toggleCrouch(){if(state.mode!=='playing'||player.carIndex>=0)return;player.crouchToggle=!player.crouchToggle;$('crouchButton')?.setAttribute('aria-pressed',String(player.crouchToggle));}
+    // Touch RUN/CROUCH mirror keyboard, pad and auto-cancel state; write the DOM only on change.
+    let movementButtonKey='';
+    function syncMovementButtons(){const run=!!input.sprint&&player.carIndex<0,crouch=!!(player.crouchToggle||input.crouchHold)&&player.carIndex<0,key=`${run}${crouch}`;if(key===movementButtonKey)return;movementButtonKey=key;$('sprintButton')?.setAttribute('aria-pressed',String(run));$('crouchButton')?.setAttribute('aria-pressed',String(crouch));}
+    function toggleCrouch(){if(state.mode!=='playing'||player.carIndex>=0)return;input.sprint=false;player.crouchToggle=!player.crouchToggle;syncMovementButtons();}
     function startJump(){
       if(state.mode!=='playing')return;
       if(state.daily?.rules?.noJet){if(player.carIndex<0&&player.grounded){player.vz=2.55;player.grounded=false;showMessage('DEAD THRUSTERS // JUMP ONLY');}return;}
       if(player.carIndex<0&&player.grounded){player.vz=3.45;player.grounded=false;audio?.footstep(true);showMessage('JET ASSIST ONLINE // HOLD SPACE TO CLIMB');}
     }
 
-    function reload(){
+    function reload(automatic=false){
       if(state.mode!=='playing'||player.reloading||player.ammo===player.magSize||player.reserve<=0)return;
-      player.reloading=true;player.reloadTimer=player.reloadTime;input.fire=input.shiftFire=input.pointerFire=false;player.ads=Math.min(player.ads,.15);audio?.reload(weaponConfig().id);showMessage('RELOADING');
+      player.reloading=true;player.reloadTimer=player.reloadTime;if(!automatic)input.fire=input.shiftFire=input.pointerFire=false;player.ads=Math.min(player.ads,.15);audio?.reload(weaponConfig().id);showMessage('RELOADING');
     }
 
     function weaponRangeFalloff(cfg,dist){
@@ -1618,7 +1636,7 @@ let accountCheckPending=true;
     }
 
     function shoot(){
-      const cfg=weaponConfig();if(player.ammo<=0){player.fireCooldown=.18;audio?.empty();showMessage(state.touch?'Magazine empty · tap Reload':'MAGAZINE EMPTY // PRESS R OR □');return;}
+      const cfg=weaponConfig();if(player.ammo<=0){if(player.reserve>0){reload(true);return;}player.fireCooldown=.3;audio?.empty();showMessage('OUT OF AMMO · FIND AMMO SUPPLIES');return;}
       const lockEligible=state.autoLock&&(state.familyMode||player.ads>.55);
       if(lockEligible&&player.carIndex<0){const directional=selectAutoLockTarget(true);if(directional){state.lockTarget=directional;player.dir=Math.atan2(directional.y-player.y,directional.x-player.x);}}
       if(state.daily?.rules?.weaponLock!=null&&player.weaponIndex!==state.daily.rules.weaponLock){equipWeapon(state.daily.rules.weaponLock,true);return;}
@@ -1718,7 +1736,7 @@ let accountCheckPending=true;
       let anyCritical=false,anyKill=false;
       for(const tally of shotHits.values()){spawnDamageNumber(tally.damage,tally.critical,tally.kill);anyCritical||=tally.critical;anyKill||=tally.kill;}
       if(shotHits.size)showHit(anyCritical,anyKill);
-      if(player.ammo===0&&player.reserve>0)setTimeout(()=>{if(state.mode==='playing')reload();},200);
+      if(shouldAutoReload(player.ammo,player.reserve,player.reloading))reload(true);
     }
 
     function killEnemy(e,critical,method='shot'){
@@ -2756,7 +2774,7 @@ let accountCheckPending=true;
       $('weaponButton').addEventListener('pointerdown',e=>{e.preventDefault();cycleWeapon(1);});
       $('meleeButton').addEventListener('pointerdown',e=>{e.preventDefault();meleeTakedown();});
       $('crouchButton')?.addEventListener('pointerdown',e=>{e.preventDefault();toggleCrouch();});
-      const sprint=$('sprintButton');sprint.addEventListener('pointerdown',e=>{input.sprint=true;sprint.setPointerCapture(e.pointerId);});sprint.addEventListener('pointerup',()=>input.sprint=false);sprint.addEventListener('pointercancel',()=>input.sprint=false);
+      const sprint=$('sprintButton');sprint.addEventListener('pointerdown',e=>{e.preventDefault();if(player.carIndex>=0||state.mode!=='playing')return;input.sprint=!input.sprint;if(input.sprint)player.crouchToggle=false;syncMovementButtons();});
       const jet=$('jetButton');jet.addEventListener('pointerdown',e=>{e.preventDefault();input.jump=true;startJump();jet.setPointerCapture(e.pointerId);});jet.addEventListener('pointerup',()=>input.jump=false);jet.addEventListener('pointercancel',()=>input.jump=false);
       const ads=$('adsButton');ads.addEventListener('pointerdown',e=>{e.preventDefault();input.aim=!input.aim;ads.setAttribute('aria-pressed',String(input.aim));});
       $('lockButton').addEventListener('pointerdown',e=>{e.preventDefault();toggleAutoLock();});
@@ -2825,6 +2843,8 @@ let accountCheckPending=true;
         damageCommander:(fraction=.4)=>{const boss=state.enemies.find(e=>e.commander&&!e.dead);if(boss)boss.hp=Math.max(1,boss.hp-boss.maxHp*fraction);},
         setFlight:(value=true)=>{if(value)startJump();input.jump=!!value;},
         equipWeapon:(index=0)=>equipWeapon(index),
+        setAmmo:(ammo,reserve)=>{player.ammo=ammo;player.reserve=reserve;player.reloading=false;player.reloadTimer=0;},
+        ammoState:()=>({ammo:player.ammo,reserve:player.reserve,magSize:player.magSize,reloading:player.reloading,reloadTime:player.reloadTime,weaponReload:weaponConfig().reload,weapon:weaponConfig().id,shots:player.shots}),
         supplyTest:(kind='health')=>{player.health=50;player.reserve=0;state.pickups.push({kind,x:player.x,y:player.y,weaponIndex:5,life:30,phase:0});updatePickups(.01);return {health:player.health,reserve:player.reserve,weapon:weaponConfig().id};},
         melee:()=>meleeTakedown(),
         damageNearestRelay:(amount=40)=>{const node=nearestLiveNode();if(node)damageDestroyNode(node,amount);return !!node;},
@@ -2865,6 +2885,7 @@ let accountCheckPending=true;
     // Guest progress on this device belongs to the account the guest creates or signs in to.
     addEventListener('neon-guest-upgraded',({detail:{from,to}})=>{
       mergeWallets(interfaceStorage,from,to);
+      mergeBadges(interfaceStorage,from,to);
       try{const local=JSON.parse(localStorage.getItem(LOCAL_CAMPAIGN_KEY)||'null');if(local?.owner===from){local.owner=to;if(local.active?.checkpoint?.owner===from)local.active.checkpoint.owner=to;localStorage.setItem(LOCAL_CAMPAIGN_KEY,JSON.stringify(local));}}catch{}
     });
     $('guestBoardSignup')?.addEventListener('click',()=>showAccountGate('Create an account or sign in to post your scores to the world leaderboard. Your guest campaign stays saved on this device.'));
