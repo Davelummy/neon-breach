@@ -39,7 +39,8 @@ export function startCommunity(refreshRanks) {
     inFlight = true;
     const status = document.getElementById('communityStatus');
     try {
-      await fetchJson('/api/auth/heartbeat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
+      // Guests have no server session, so they read counts without counting as online.
+      if (!accountUser().guest) await fetchJson('/api/auth/heartbeat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
       const data = await fetchJson('/api/auth/stats');
       if (status) status.textContent = `${Number(data.total_players).toLocaleString()} registered players · ${Number(data.online_players).toLocaleString()} online`;
       failures = 0;

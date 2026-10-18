@@ -746,6 +746,7 @@ function cullLowWorld(frame) {
 
 const accountGate=document.getElementById('accountGate');
 function animate() {
+  if(document.getElementById('weaponPreviewDialog')?.open)return;
   if(document.body.classList.contains('multiplayer-active'))return;
   // The opaque signup dialog fully covers the world; keep authentication responsive.
   if(accountGate&&!accountGate.classList.contains('hidden'))return;

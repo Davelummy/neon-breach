@@ -27,8 +27,10 @@ test('local snapshot is captured before an in-flight cloud guard and never sent 
 });
 test('campaign loading waits for identity and QA glass fixture restores ammunition',async()=>{
   const game=await readFile('public/game.js','utf8');
-  const load=game.slice(game.indexOf('async function loadCampaignRecords()'),game.indexOf('async function loadCampaignRecords()')+500);
-  assert.ok(load.indexOf('await accountInitialization')<load.indexOf("fetch('/api/campaigns'"));
+  const start=game.indexOf('async function loadCampaignRecords()');
+  const load=game.slice(start,game.indexOf('\n    function renderArsenal()',start));
+  const identity=load.indexOf('await accountInitialization'),request=load.indexOf("fetch('/api/campaigns'");
+  assert.ok(identity>=0&&request>identity);
   const fixture=game.slice(game.indexOf('prepareGlassTest:()=>'),game.indexOf('damageCommander:'));
   assert.match(fixture,/player.ammo=weaponConfig\(\).mag/);assert.match(fixture,/carIndex:-1/);
 });

@@ -1,5 +1,6 @@
+import {renderWeaponCards} from './weapon-cards.js';
 import { fetchJson, startCommunity, publishResult, resultUrl, downloadScorecard } from './community.js';
-import {accountUser,initializeAccounts,showAccountGate} from './accounts.js';
+import {accountUser,isGuest,initializeAccounts,showAccountGate} from './accounts.js';
 import {drawCombatRadar,selectConnectedGamepad} from './combat-interface.js';
 import { MAP_W, MAP_H, GROUND_HEIGHT, WALL_HEIGHTS, DIFFICULTIES, ENEMY_TYPES, WEAPONS, PERKS,
   CAR_SPAWNS, WAVE_TABLE, MISSIONS, OPERATIONS, MISSION_CONDITIONS, spawns, map, STAIR_ZONES,
@@ -9,7 +10,7 @@ import { requestLandscape, initializeInterface } from '/mobile-controls.js';
 import {LIVE_STATIONS,VehicleRadio,discoverStations,cachedStations} from '/vehicle-radio.js';
 import {rayVehicleDistance,blastDamage,encounterExtras,MAX_LIVE_ENEMIES,vehicleIntegrity,vehicleBallisticDamage,vehicleImpactDamage,enemyPerception,tacticalShotSpread,perceptionDue,shareObservation,reinforcementEntry} from '/combat-rules.js';
 import {captureCheckpoint,restoreCheckpoint} from '/checkpoint.js';
-import {readWallet,buyGun,GUN_PRICES,createCityLife,updateCityLife} from '/city-life.js';
+import {readWallet,buyGun,mergeWallets,GUN_PRICES,createCityLife,updateCityLife} from '/city-life.js';
 import {updateVehicleHandling} from '/vehicle-handling.js';
 let accountCheckPending=true;
 
@@ -110,12 +111,39 @@ let accountCheckPending=true;
     // unlocks for weapons and perks are evaluated against these.
     const career = { kills:0, takedowns:0, roadkills:0, victories:0 };
     function meetsUnlock(unlock){return !unlock||Object.entries(unlock).every(([key,value])=>key==='label'||(career[key]||0)>=value);}
-    function weaponUnlocked(index){return readWallet(interfaceStorage,accountUser()?.id).owned.includes(index)||meetsUnlock(WEAPONS[index]?.unlock);}
+    function weaponUnlocked(index){return Number.isInteger(index)&&index>=0&&index<WEAPONS.length&&(readWallet(interfaceStorage,accountUser()?.id).owned.includes(index)||meetsUnlock(WEAPONS[index].unlock));}
     function saveWallet(wallet){try{interfaceStorage?.setItem(`neon-wallet:${accountUser()?.id}`,JSON.stringify(wallet));return !!interfaceStorage;}catch{return false;}}
     function toggleNightVision(){state.nightVision=!state.nightVision;updateNightVision();$('nightVisionButton').textContent=state.nightVision?'NVG ON':'NVG OFF';$('nightVisionButton').setAttribute('aria-pressed',String(state.nightVision));showMessage(state.nightVision?'NIGHT VISION ON':'NIGHT VISION OFF');}
     function toggleView(){state.viewMode=state.viewMode==='first'?'third':'first';$('viewButton').textContent=state.viewMode==='third'?'VIEW 3P':'VIEW 1P';showMessage(state.viewMode==='third'?'THIRD PERSON · V / TOUCH VIEW / CONTROLLER TOUCHPAD':'FIRST PERSON');}
     function nearGunShop(){return state.gunShop&&player.carIndex<0&&Math.hypot(player.x-state.gunShop.x,player.y-state.gunShop.y)<2;}
-    function renderGunShop(){const wallet=readWallet(interfaceStorage,accountUser()?.id);$('shopBalance').textContent=`${wallet.credits} earned credits · 20 per hostile eliminated · saved on this device`;const list=$('shopWeapons');list.replaceChildren();WEAPONS.forEach((weapon,index)=>{const button=document.createElement('button');button.className='secondary';const owned=weaponUnlocked(index);button.textContent=owned?`Equip ${weapon.name}`:`Buy ${weapon.name} · ${GUN_PRICES[index]} credits`;button.disabled=!owned&&wallet.credits<GUN_PRICES[index];button.onclick=()=>{if(!weaponUnlocked(index)){const next=readWallet(interfaceStorage,accountUser()?.id);if(!buyGun(next,index)||!saveWallet(next)){$('shopStatus').textContent='Purchase could not be saved. No gun was unlocked.';return;}}equipWeapon(index,true);$('shopStatus').textContent=`${weapon.name} equipped`;renderGunShop();renderArsenal();};list.append(button);});}
+    function weaponCardState(index,selected=false){const locked=!weaponUnlocked(index),unlock=locked&&weaponUnlockProgress(index);return {selected,locked,label:selected?'Selected':locked?(unlock?.target>1?`Locked · ${unlock.current}/${unlock.target}`:'Locked'):'Available'};}
+    const UNLOCK_NOUNS={kills:'eliminations',takedowns:'finishers',roadkills:'roadkills',victories:'wins'};
+    // Locked cards show real career progress and the armory price, never a vague "earn it".
+    function weaponUnlockProgress(index){
+      if(weaponUnlocked(index))return null;const unlock=WEAPONS[index].unlock||{};const key=Object.keys(unlock).find(k=>k!=='label'&&Number.isFinite(unlock[k]));
+      const price=GUN_PRICES[index],buy=price?` · or ${price} credits at the district armory`:'';
+      if(!key)return {current:0,target:1,text:`Unlock in campaign${buy}`};
+      const current=Math.min(career[key]||0,unlock[key]);return {current,target:unlock[key],text:`${current} / ${unlock[key]} career ${UNLOCK_NOUNS[key]||key}${buy}`};
+    }
+    function selectStartingWeapon(index){
+      if(!weaponUnlocked(index)){$('loadoutHint').textContent=WEAPONS[index].unlock?.label||'This weapon is locked.';return;}
+      const focusContainer=document.activeElement?.closest('.weapon-card-grid')?.id;
+      selectedLoadout=index;$('loadoutWeapon').value=String(index);try{localStorage.setItem('neon-breach-loadout',String(index));}catch{}
+      $('loadoutHint').textContent=`${WEAPONS[index].name} selected. Switch available weapons with 1–6 or weapon cycling. Daily challenges may fix the weapon.`;renderVisualWeapons();
+      if(focusContainer)$(focusContainer)?.querySelector(`[data-weapon-index="${index}"] .weapon-picture`)?.focus({preventScroll:true});
+    }
+    function renderVisualWeapons(){
+      const choices={state:i=>weaponCardState(i,i===selectedLoadout),action:i=>({label:i===selectedLoadout?'Selected':weaponUnlocked(i)?'Select loadout':'Locked',disabled:i===selectedLoadout||!weaponUnlocked(i)}),onAction:selectStartingWeapon};
+      const detailed={...choices,progress:weaponUnlockProgress};
+      renderWeaponCards($('loadoutCards'),WEAPONS,{...detailed,compact:true});renderWeaponCards($('arsenalCards'),WEAPONS,{...detailed,compact:true});renderWeaponCards($('homeLoadoutCards'),WEAPONS,detailed);
+      const wallet=$('loadoutWallet');if(wallet){const credits=readWallet(interfaceStorage,accountUser()?.id).credits;wallet.innerHTML='';const a=document.createElement('span'),b=document.createElement('span');a.append('Earned credits ',Object.assign(document.createElement('b'),{textContent:credits.toLocaleString()}));b.textContent=`${career.kills.toLocaleString()} career elimination${career.kills===1?'':'s'}`;wallet.append(a,b);}
+    }
+    function renderGunShop(){const wallet=readWallet(interfaceStorage,accountUser()?.id);$('shopBalance').textContent=`${wallet.credits} earned credits · 20 per hostile eliminated · saved on this device`;
+      renderWeaponCards($('shopWeapons'),WEAPONS,{state:i=>weaponCardState(i,i===player.weaponIndex),action:i=>({label:weaponUnlocked(i)?`Equip ${WEAPONS[i].short}`:`Buy ${WEAPONS[i].short} · ${GUN_PRICES[i]} credits`,disabled:!weaponUnlocked(i)&&wallet.credits<GUN_PRICES[i]}),onAction:index=>{
+        if(!weaponUnlocked(index)){const next=readWallet(interfaceStorage,accountUser()?.id);if(!buyGun(next,index)||!saveWallet(next)){$('shopStatus').textContent='Purchase could not be saved. No gun was unlocked.';return;}}
+        equipWeapon(index,true);$('shopStatus').textContent=`${WEAPONS[index].name} equipped`;renderGunShop();renderArsenal();
+      }});
+    }
     function openGunShop(){if(!nearGunShop())return;pauseGame();$('gunShopPanel').hidden=false;$('modalTitle').textContent='District Armory';$('modalText').textContent='Campaign paused while shopping. Earn credits by completing combat, not by paying money.';renderGunShop();requestAnimationFrame(()=>refreshMenuFocus(true));}
     function perkUnlocked(id){const perk=PERKS.find(p=>p.id===id);return !!perk&&meetsUnlock(perk.unlock);}
     function perkApply(id){return PERKS.find(p=>p.id===id)?.apply||{};}
@@ -380,6 +408,7 @@ let accountCheckPending=true;
     }
 
     function showMenuScreen(id){
+      if(id==='screenRanks'&&isGuest()){showAccountGate('Create an account or sign in to use the world leaderboard. Your guest campaign stays saved on this device.');return;}
       document.querySelectorAll('.menu-screen').forEach(el=>el.classList.toggle('active',el.id===id));
       if(id==='screenMain')document.querySelectorAll('#screenMain details').forEach(el=>el.open=false);
       updateMissionOptionsSummary();
@@ -390,6 +419,7 @@ let accountCheckPending=true;
 
     // Gamepad / keyboard focus list for the active menu panel or pause modal.
     function menuUiRoot(){
+      const preview=$('weaponPreviewDialog');if(preview?.open)return preview;
       if(state.mode==='menu')return document.querySelector('#menuRoot .menu-screen.active');
       const modal=$('modalScreen');
       if(modal&&!modal.classList.contains('hidden'))return modal;
@@ -398,7 +428,7 @@ let accountCheckPending=true;
     function menuFocusables(){
       const root=menuUiRoot();
       if(!root)return[];
-      return Array.from(root.querySelectorAll('button, input, select, summary')).filter(el=>{
+      return Array.from(root.querySelectorAll('button, input, select, summary, a[href]')).filter(el=>{
         if(el.disabled||el.classList.contains('hidden'))return false;
         if(el.getAttribute('aria-hidden')==='true')return false;
         // Skip display:none / zero-size (hidden continue, etc.)
@@ -506,6 +536,7 @@ let accountCheckPending=true;
       requestAnimationFrame(()=>refreshMenuFocus(true));
     }
     function menuGoBack(){
+      if($('weaponPreviewDialog')?.open){$('weaponPreviewDialog').close();return;}
       playUiClick('back');
       if(state.mode==='paused'){resumeGame();return;}
       if(state.mode!=='menu'){
@@ -514,7 +545,7 @@ let accountCheckPending=true;
         return;
       }
       const active=document.querySelector('#menuRoot .menu-screen.active');
-      const backMap={screenOps:'screenMain',screenDeploy:'screenOps',screenSettings:'screenMain',screenRecords:'screenMain',screenRanks:'screenMain',screenHow:'screenMain',screenControls:'screenMain'};
+      const backMap={screenLoadout:'screenMain',screenOps:'screenMain',screenDeploy:'screenOps',screenSettings:'screenMain',screenRecords:'screenMain',screenRanks:'screenMain',screenHow:'screenMain',screenControls:'screenMain'};
       const dest=backMap[active?.id];
       if(!dest)return;
       showMenuScreen(dest);
@@ -598,7 +629,7 @@ let accountCheckPending=true;
       $('viewButton').onclick=toggleView;$('nightVisionButton').onclick=toggleNightVision;
       $('pausedNvg').onclick=toggleNightVision;$('pausedView').onclick=toggleView;$('campaignTime').onchange=()=>setMissionTime($('campaignTime').value);
       const loadout=$('loadoutWeapon');
-      if(loadout){loadout.replaceChildren();WEAPONS.forEach((weapon,index)=>{const option=document.createElement('option');option.value=String(index);option.textContent=`${weapon.name} · ${weapon.mag} rounds${weapon.unlock?' · career unlock required':''}`;loadout.append(option);});loadout.value=String(selectedLoadout);loadout.addEventListener('change',()=>{const index=Number(loadout.value);if(!weaponUnlocked(index)){loadout.value=String(selectedLoadout);$('loadoutHint').textContent=WEAPONS[index].unlock.label;return;}selectedLoadout=index;try{localStorage.setItem('neon-breach-loadout',String(index));}catch{}$('loadoutHint').textContent=`Start with ${WEAPONS[index].name}. Other unlocked guns remain available with 1–6 or weapon cycling.`;});}
+      if(loadout){loadout.replaceChildren();WEAPONS.forEach((weapon,index)=>{const option=document.createElement('option');option.value=String(index);option.textContent=`${weapon.name} · ${weapon.mag} rounds`;loadout.append(option);});loadout.value=String(selectedLoadout);loadout.addEventListener('change',()=>{selectStartingWeapon(Number(loadout.value));loadout.value=String(selectedLoadout);});}
       const station=$('radioStation'),musicVolume=$('radioVolume');
       if(station){station.replaceChildren();for(const id of radioStations){const option=document.createElement('option');option.value=id;option.textContent=radioNames[id];station.append(option);}station.value=radioStation;station.addEventListener('change',()=>selectRadioStation(station.value));}
       updateRadioLabel();
@@ -933,6 +964,7 @@ let accountCheckPending=true;
     function startGame(saved=null) {
       if(accountCheckPending){accountInitialization.then(()=>startGame(saved));return;}
       if(!accountUser()){showAccountGate();return;}
+      $('guestPostScore')?.classList.add('hidden');
       ensureAudio();
       audio?.stopMenuMusic?.();
       audio?.startHum?.();
@@ -985,11 +1017,13 @@ let accountCheckPending=true;
 
     // Pointer lock is for mouse-look only. Losing lock must NOT pause the sim —
     // that made WASD feel broken when the browser denied lock or the user hit Esc.
-    let pointerWanted=false,pointerHeld=false,freeLook=false,freeLookLast=null;
+    let pointerWanted=false,pointerHeld=false,freeLook=false,primaryLook=false,freeLookLast=null;
+    function releaseDragLook(){primaryLook=false;freeLook=false;freeLookLast=null;input.aim=false;}
+    function pointerCaptureFailed(){pointerWanted=false;if(state.mode==='playing')showMessage('DRAG VIEW TO LOOK · SHIFT TO FIRE · CLICK TO RETRY MOUSE CAPTURE');}
     function requestLock(){
       if(coarsePointer||document.pointerLockElement===canvas)return;
       pointerWanted=true;
-      try{const req=canvas.requestPointerLock?.();req?.catch?.(()=>{pointerWanted=false;if(state.mode==='playing')showMessage('CLICK THE VIEW TO CAPTURE MOUSE LOOK // WASD STILL MOVES');});}catch{pointerWanted=false;}
+      try{if(!canvas.requestPointerLock){pointerCaptureFailed();return;}const req=canvas.requestPointerLock();req?.catch?.(pointerCaptureFailed);}catch{pointerCaptureFailed();}
     }
     let storedRadioStations=[];try{storedRadioStations=cachedStations(localStorage);}catch{}
     const liveRadio=new VehicleRadio({stations:storedRadioStations,onChange:()=>updateRadioLabel()});
@@ -1006,12 +1040,14 @@ let accountCheckPending=true;
         if(stations.length&&!stations.some(s=>s.id===radioStation))radioStation=stations[0].id;
         if(!stations.length){updateRadioLabel();showMessage('RADIO DIRECTORY UNAVAILABLE · TAP TUNE TO RETRY');return;}
       }
+      if(radioStation==='off'&&liveRadio.stations.length)radioStation=liveRadio.stations[0].id;
       // Playback gate is rechecked after metadata loading: never play on foot.
       selectRadioStation(radioStation);updateRadioLabel();
     }
     function updateRadioLabel(){
       const car=state.cars?.[player.carIndex],visible=!!car&&state.mode==='playing',status=liveRadio.status();
       $('gameRadio').hidden=!visible;document.body.classList.toggle('in-vehicle',!!car);
+      $('gameRadioContext').textContent=coarsePointer?'LIVE VEHICLE RADIO':'LIVE RADIO · N: TUNE / NEXT';
       $('jetButton').textContent=car?'BOOST':'JET';$('jetButton').setAttribute('aria-label',car?'Hold for vehicle boost':'Hold to jump and fly');
       const labels={unconfigured:'Tune Nigerian radio',connecting:'Connecting…',buffering:'Buffering…',blocked:'Tap play to listen',unavailable:'Stream unavailable'};
       $('gameRadioStation').textContent=radioDiscovering?'Finding stations…':state.muted?'Sound muted':radioVolume===0?'Radio volume 0':labels[status.state]||radioNames[radioStation]||'Tune Nigerian radio';
@@ -1019,11 +1055,11 @@ let accountCheckPending=true;
       if($('radioStation'))$('radioStation').value=radioStation;
       $('radioPrevious').disabled=$('radioNext').disabled=liveRadio.stations.length===0;
       $('radioPrevious').hidden=$('radioNext').hidden=liveRadio.stations.length===0;
-      $('radioPlay').disabled=radioDiscovering;$('radioPlay').hidden=status.configured&&!['blocked','unavailable'].includes(status.state);$('radioPlay').textContent=status.configured?'▶':'Tune';$('radioPlay').setAttribute('aria-label',status.configured?'Play selected live station':'Discover Nigerian live radio stations');
+      $('radioPlay').disabled=radioDiscovering;$('radioPlay').hidden=status.configured&&!['off','blocked','unavailable'].includes(status.state);$('radioPlay').textContent=status.configured?'▶':'Tune';$('radioPlay').setAttribute('aria-label',status.configured?'Play selected live station':'Discover Nigerian live radio stations');
       $('gameRadio').setAttribute('aria-label',car?`${car.name} live radio controls`:'Vehicle live radio controls');
     }
     function selectRadioStation(station){if(!radioStations.includes(station))return;radioStation=station;try{localStorage.setItem('neon-breach-live-radio',station);}catch{}startGameplayRadio();}
-    function cycleRadioStation(direction){if(player.carIndex<0||state.mode!=='playing')return;selectRadioStation(radioStations[(radioStations.indexOf(radioStation)+direction+radioStations.length)%radioStations.length]);}
+    function cycleRadioStation(direction){if(player.carIndex<0||state.mode!=='playing')return;if(!liveRadio.stations.length){void tuneLiveRadio();return;}selectRadioStation(radioStations[(radioStations.indexOf(radioStation)+direction+radioStations.length)%radioStations.length]);}
     async function switchScreenMode(){
       if(document.fullscreenElement){try{screen.orientation?.unlock?.();await document.exitFullscreen();}catch{}return;}
       const result=await requestLandscape(document,screen.orientation);
@@ -1038,7 +1074,7 @@ let accountCheckPending=true;
       pointerWanted=false;saveCampaign('active',true);state.mode='paused';audio?.stopRadio();liveRadio.stop();updateRadioLabel();$('touchExtras').hidden=true;$('touchMoreButton').setAttribute('aria-expanded','false');
       resetTouchInputs();for(const key of Object.keys(input))input[key]=typeof input[key]==='number'?0:false;moveAxis.x=moveAxis.y=controllerAxis.x=controllerAxis.y=0;
       input.fire=input.shiftFire=input.pointerFire=input.aim=input.jump=false;
-      freeLook=false;document.exitPointerLock?.();
+      releaseDragLook();document.exitPointerLock?.();
       $('modalEyebrow').textContent='PAUSED';$('modalTitle').textContent='Paused';
       $('modalText').textContent=campaignCloud.active?.persisted?'Position and world saved on this device. Resume here or choose Continue after returning.':'Local saving is unavailable. Keep this tab open to preserve this run.';
       const stage=missionStages()[state.missionStage];$('pausedMission').hidden=!stage;$('pausedMission').open=false;
@@ -1334,7 +1370,7 @@ let accountCheckPending=true;
       if(!pad){controllerAxis={x:0,y:0};input.gamepadFire=input.gamepadAim=input.gamepadJump=input.gamepadSprint=false;input.gamepadAimValue=0;gamepadPrevious=[];return;}
       const down=pad.buttons.map(button=>button.pressed||button.value>.5),pressed=index=>down[index]&&!gamepadPrevious[index];
       // Options: pause / resume only — never skip the menu into a deploy.
-      if(pressed(9)){if(state.mode==='playing')pauseGame();else if(state.mode==='paused')resumeGame();}
+      if(pressed(9)){if($('weaponPreviewDialog')?.open)$('weaponPreviewDialog').close();else if(state.mode==='playing')pauseGame();else if(state.mode==='paused')resumeGame();}
       if(pressed(4)&&state.mode==='playing')toggleAutoLock();if(pressed(17)&&state.mode==='playing')toggleView();if(pressed(8)&&state.mode==='playing')toggleNightVision();
       if(state.mode!=='playing'){
         controllerAxis={x:0,y:0};input.gamepadFire=input.gamepadAim=input.gamepadJump=input.gamepadSprint=false;input.gamepadAimValue=0;
@@ -2061,6 +2097,7 @@ let accountCheckPending=true;
     }
 
     async function saveCampaign(status='active',force=false){
+      if(isGuest())campaignCloud.offline=true;
       if(!force&&state.mode!=='playing')return;
       const payload=campaignPayload(status),localRecord=writeLocalCampaign(status,payload);
       if(status==='active'){campaignCloud.active=localRecord;campaignCloud.id=localRecord.id;}
@@ -2080,6 +2117,7 @@ let accountCheckPending=true;
     async function loadCampaignRecords(){
       // Account-bound local checkpoints cannot be selected before session identity resolves.
       if(accountCheckPending)await accountInitialization;
+      if(isGuest()){campaignCloud.offline=true;useLocalCampaign();if($('syncStatus'))$('syncStatus').textContent=campaignCloud.active||campaignCloud.records.length?'LOCAL SAVE':'DEVICE ONLY';return;}
       if($('syncStatus'))$('syncStatus').textContent='CONNECTING';
       try{
         const response=await fetch('/api/campaigns',{signal:AbortSignal.timeout(8000),headers:campaignHeaders()});if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw new Error(`load ${response.status}`);const data=await response.json();if(data.available===false)throw new Error('campaign storage unavailable');campaignCloud.offline=false;campaignCloud.records=Array.isArray(data.records)?data.records:[];const localActive=localCampaignState()?.active;campaignCloud.active=localActive?.checkpoint&&(!data.active||Date.parse(localActive.updated_at)>=Date.parse(data.active.updated_at||0)||localActive.elapsed_seconds===data.active.elapsed_seconds&&localActive.score===data.active.score)?localActive:data.active||null;campaignCloud.remoteBest=Number(data.best_score||0);if(data.career)for(const key of Object.keys(career))career[key]=Number(data.career[key]||0);renderCampaignRecords();renderArsenal();if($('syncStatus'))$('syncStatus').textContent='CLOUD READY';
@@ -2088,10 +2126,10 @@ let accountCheckPending=true;
     }
 
     function renderArsenal(){
+      renderVisualWeapons();
       const list=$('arsenalRows');if(!list)return;list.replaceChildren();
       if($('careerStatus'))$('careerStatus').textContent=`CAREER // ${career.kills} ELIMS · ${career.victories} WINS`;
       const rows=[
-        ...WEAPONS.filter(weapon=>weapon.unlock).map(weapon=>({name:`${weapon.short} ${weapon.name.split(' ').slice(1).join(' ')}`,desc:weapon.unlock.label,done:meetsUnlock(weapon.unlock)})),
         ...PERKS.map(perk=>({name:perk.name,desc:`${perk.desc} · ${perk.unlock.label}`,done:meetsUnlock(perk.unlock)}))
       ];
       for(const row of rows){
@@ -2124,6 +2162,7 @@ let accountCheckPending=true;
     let leaderboardRevision=0;
     let lastPublicResult=null;
     let lastLocalResult=null;
+    let pendingGuestScore=null;
 
     function getCallsign(){
       if(accountUser())return accountUser().username.toUpperCase();
@@ -2317,10 +2356,16 @@ let accountCheckPending=true;
       $('downloadScoreButton')?.classList.remove('hidden');
       pushLocalBoard(entry);
       if(entry.score<=0){if(publishStatus)publishStatus.textContent='Saved on this device. Zero-score runs are not submitted to the leaderboard.';return null;}
+      let rank=null;
+      $('guestPostScore')?.classList.toggle('hidden',!isGuest());
+      if(isGuest()){
+        // Guest scores stay local; signing up from the debrief posts this exact run.
+        pendingGuestScore=payload;
+        if(publishStatus)publishStatus.textContent='Saved on this device. Create an account to post this score to the world leaderboard.';
+      }else{
       try { lastPublicResult=await publishResult(entry); } catch {}
       if(share&&lastPublicResult)share.textContent='Share public result';
       if(publishStatus)publishStatus.textContent=lastPublicResult?'Public result available. Anyone with the link can view it. Updating leaderboard…':'Saved on this device. Public result unavailable; you can still share score text or download a scoreboard.';
-      let rank=null;
       try{
         const data=await fetchJson('/api/leaderboard',{
           method:'POST',
@@ -2338,9 +2383,10 @@ let accountCheckPending=true;
           return rank;
         }
       }catch{}
+      }
       const local=boardToEntries(readLocalBoard().filter(e=>leaderboardOpFilter==null||Number(e.operation||0)===leaderboardOpFilter));
       state.lastScoreSource='DEVICE';
-      if(publishStatus)publishStatus.textContent=lastPublicResult?'Public result available. Leaderboard unavailable; the rank below is device-only.':'Saved on this device. Leaderboard and public result unavailable; share score text or download your scoreboard.';
+      if(publishStatus&&!isGuest())publishStatus.textContent=lastPublicResult?'Public result available. Leaderboard unavailable; the rank below is device-only.':'Saved on this device. Leaderboard and public result unavailable; share score text or download your scoreboard.';
       renderLeaderboard(local);
       const hit=local.find(e=>e.you&&Number(e.best_score)===entry.score);
       rank=hit?.rank||null;
@@ -2418,7 +2464,8 @@ let accountCheckPending=true;
     function pitchSign(){return state.invertY||prefs.invertY?-1:1;}
 
     function renderCampaignRecords(){
-      const history=$('campaignHistory');if(!history)return;history.replaceChildren();const active=campaignCloud.active,records=campaignCloud.records.filter(record=>record.status!=='active').slice(0,3);$('continueButton').classList.toggle('hidden',!active);if(active)$('continueButton').textContent=`CONTINUE ${OPERATIONS[Number(active.operation)||0]?.short||'FS'} PHASE ${String(Math.max(1,Number(active.wave||1))).padStart(2,'0')} // ${Number(active.score||0).toLocaleString()} PTS`;
+      const history=$('campaignHistory');if(!history)return;history.replaceChildren();const active=campaignCloud.active,records=campaignCloud.records.filter(record=>record.status!=='active').slice(0,3);$('continueButton').classList.toggle('hidden',!active);$('continueButton').textContent='Continue';
+      const play=document.querySelector('#screenMain [data-goto="screenOps"]');if(play){play.textContent=active?'New campaign':'Play';play.classList.toggle('primary',!active);play.classList.toggle('secondary',!!active);}
       const visible=active?[active,...records]:records;if(!visible.length){const row=document.createElement('div');row.className='campaign-row';row.innerHTML='<div><b>NO OPERATIONS RECORDED</b><span>Your campaign outcomes will appear here.</span></div><strong>—</strong>';history.append(row);updateBestScore();return;}
       for(const record of visible){const row=document.createElement('div'),status=record.status==='active'?'IN PROGRESS':record.status==='victory'?'MISSION WON':record.status==='failed'?'MISSION FAILED':'CAMPAIGN CLOSED';row.className=`campaign-row ${record.status}`;const detail=document.createElement('div'),title=document.createElement('b'),meta=document.createElement('span'),score=document.createElement('strong');title.textContent=`${status} // ${OPERATIONS[Number(record.operation)||0]?.short||'FS'} PHASE ${String(Math.max(1,Number(record.wave||1))).padStart(2,'0')}`;meta.textContent=`${String(record.time_of_day||'day').toUpperCase()} · ${String(record.difficulty||'operative').toUpperCase()} · ${Number(record.kills||0)} ELIMS`;score.textContent=Number(record.score||0).toLocaleString();detail.append(title,meta);row.append(detail,score);history.append(row);}updateBestScore();
     }
@@ -2463,7 +2510,7 @@ let accountCheckPending=true;
     });
     addEventListener('keyup',e=>setKey(e.code,false));
     // Only clear keys on real window blur — never auto-pause (that trapped players).
-    addEventListener('blur',()=>{Object.keys(input).forEach(k=>{if(typeof input[k]==='boolean')input[k]=false;});input.gamepadAimValue=0;moveAxis={x:0,y:0};});
+    addEventListener('blur',()=>{releaseDragLook();Object.keys(input).forEach(k=>{if(typeof input[k]==='boolean')input[k]=false;});input.gamepadAimValue=0;moveAxis={x:0,y:0};});
     addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(resize,80);});
     matchMedia('(orientation:portrait)').addEventListener('change',()=>{resetTouchInputs();resize();});
     document.addEventListener('fullscreenchange',()=>{resetTouchInputs();resize();const button=$('screenModeButton');if(button){button.textContent=document.fullscreenElement?'EXIT':'SCREEN';button.setAttribute('aria-label',document.fullscreenElement?'Exit fullscreen and unlock orientation':'Try landscape fullscreen');}});
@@ -2475,8 +2522,8 @@ let accountCheckPending=true;
         player.pitch=Math.max(-canvas.height*.2,Math.min(canvas.height*.2,player.pitch-e.movementY*.32*sens*inv));
         return;
       }
-      // Unlocked free-look: hold right mouse (or freeLook drag) so players can aim without pointer lock.
-      if(freeLook||input.aim){
+      // Primary drag works with a trackpad when an embedded browser denies lock.
+      if(primaryLook||freeLook||input.aim){
         const mx=e.movementX||(freeLookLast?e.clientX-freeLookLast.x:0),my=e.movementY||(freeLookLast?e.clientY-freeLookLast.y:0);
         freeLookLast={x:e.clientX,y:e.clientY};
         const sens=lookScale(),inv=pitchSign();
@@ -2489,16 +2536,18 @@ let accountCheckPending=true;
       audio?.resume();
       if(e.target.closest?.('button,select,input,a'))return;
       if(e.button===0){
-        if(!coarsePointer&&document.pointerLockElement!==canvas){requestLock();showMessage('MOUSE LOOK CAPTURED // ESC RELEASES LOOK ONLY');}
+        if(!coarsePointer&&document.pointerLockElement!==canvas){primaryLook=true;freeLookLast={x:e.clientX,y:e.clientY};e.preventDefault();requestLock();}
         else{input.pointerFire=true;syncFire();}
       }
       if(e.button===2){input.aim=true;freeLook=true;freeLookLast={x:e.clientX,y:e.clientY};}
     });
-    document.addEventListener('mouseup',e=>{if(e.button===0){input.pointerFire=false;syncFire();}if(e.button===2){input.aim=false;freeLook=false;freeLookLast=null;}});
+    document.addEventListener('mouseup',e=>{if(e.button===0){primaryLook=false;freeLookLast=null;input.pointerFire=false;syncFire();}if(e.button===2){input.aim=false;freeLook=false;freeLookLast=null;}});
+    document.addEventListener('pointercancel',releaseDragLook);
+    document.addEventListener('pointerlockerror',pointerCaptureFailed);
     document.addEventListener('wheel',e=>{if(state.mode==='playing'){e.preventDefault();cycleWeapon(e.deltaY>0?1:-1);}},{passive:false});
     document.addEventListener('pointerlockchange',()=>{
       pointerHeld=document.pointerLockElement===canvas;
-      if(pointerHeld){pointerWanted=true;return;}
+      if(pointerHeld){primaryLook=false;freeLookLast=null;pointerWanted=true;if(state.mode==='playing')showMessage('MOUSE LOOK CAPTURED // ESC RELEASES LOOK');return;}
       // Esc / focus loss: release look, keep simulation running so movement still works.
       if(!coarsePointer&&state.mode==='playing'&&pointerWanted){
         pointerWanted=false;
@@ -2579,7 +2628,9 @@ let accountCheckPending=true;
     if(new URLSearchParams(location.search).has('qa')){
       window.__NEON_QA__={
         snapshot:()=>({mode:state.mode,operation:state.operation,wave:state.wave,wavePhase:state.wavePhase,missionStage:state.missionStage,missionProgress:state.missionProgress,missionHold:state.missionHold,objective:state.objective,pending:state.pending.length,enemies:state.enemies.length,corpses:state.corpses.length,bloodDecals:state.bloodDecals.length,brokenGlass:state.brokenGlass.size,airborneEnemies:state.enemies.filter(enemy=>!enemy.grounded).length,score:player.score,kills:player.kills,shots:player.shots,hits:player.hits,z:player.z,vz:player.vz,grounded:player.grounded,jetFuel:player.jetFuel,health:player.health,shield:player.shield,armor:player.armor,shieldDelay:player.shieldDelay,ads:player.ads,autoLock:state.autoLock,lockTarget:state.lockTarget?.type||null,gore:state.gore,ammo:player.ammo,weapon:weaponConfig().id,carIndex:player.carIndex,melee:state.melee,destroyLive:state.destroyNodes.filter(n=>!n.dead).length,destroyTotal:state.destroyNodes.length,commanderAbility:state.commander?.activeAbility||null,cloakTimer:state.commander?.cloakTimer||0,tutorialStep:state.tutorialStep,timeOfDay:state.timeOfDay,finisherCam:!!state.finisherCam?.active,comboPeak:state.comboPeak,damageTaken:state.damageTaken,daily:state.daily?.id||null,opId:currentOp()?.id||null}),
-        completePhase:()=>{state.qaInvulnerable=true;const def=missionStages()[state.missionStage];if(def?.type==='defend'){state.missionHold=0;}else if(def?.type==='destroy'){for(const node of state.destroyNodes){node.hp=0;node.dead=true;}advanceMission();}else if(def?.type==='hvt'){const boss=state.enemies.find(enemy=>enemy.commander&&!enemy.dead);if(boss)killEnemy(boss,false);else advanceMission();}else if(state.missionStage<missionStages().length-1)advanceMission();},
+        completePhase:()=>{state.qaInvulnerable=true;const def=missionStages()[state.missionStage];if(def?.type==='defend'){state.missionHold=0;}else if(def?.type==='destroy'){for(const node of state.destroyNodes){node.hp=0;node.dead=true;}advanceMission();}else if(def?.type==='hvt'){const boss=state.enemies.find(enemy=>enemy.commander&&!enemy.dead);if(boss)killEnemy(boss,false);else advanceMission();}else if(def?.type==='extract')window.__NEON_QA__.completeExtraction();else if(state.missionStage<missionStages().length-1)advanceMission();},
+        // Board a live vehicle and park it on the beacon; the extract tick arms and confirms it.
+        completeExtraction:()=>{const def=missionStages()[state.missionStage];if(state.mode!=='playing'||def?.type!=='extract')return false;if(player.carIndex<0){const index=state.cars.findIndex(car=>!car.destroyed&&!car.occupied);if(index<0)return false;state.cars[index].occupied=true;player.carIndex=index;}const car=state.cars[player.carIndex];[car.x,car.y]=def.beacon;car.speed=0;Object.assign(player,{x:car.x,y:car.y,z:.62,vz:0,grounded:true});return true;},
         teleport:(x=player.x,y=player.y)=>{player.x=Number(x);player.y=Number(y);player.z=surfaceHeight(player.x,player.y);},
         skipWait:()=>{state.waveTimer=0;state.spawnTimer=0},
         setInvulnerable:(value=true)=>{state.qaInvulnerable=!!value;},
@@ -2655,5 +2706,11 @@ let accountCheckPending=true;
     getSyncCode();
     for(const id of ['rankPeriod','rankDifficulty'])$(id)?.addEventListener('change',()=>loadLeaderboard());
     $('downloadScoreButton')?.addEventListener('click',()=>{if(lastPublicResult||lastLocalResult)downloadScorecard(lastPublicResult||lastLocalResult);});
-    const accountInitialization=initializeAccounts(user=>{if(user){$('settingCallsign').value=user.username;startCommunity(loadLeaderboard);if(!accountCheckPending)loadCampaignRecords();}else if(state.mode==='playing')pauseGame();}).finally(()=>{accountCheckPending=false;});
+    // Guest progress on this device belongs to the account the guest creates or signs in to.
+    addEventListener('neon-guest-upgraded',({detail:{from,to}})=>{
+      mergeWallets(interfaceStorage,from,to);
+      try{const local=JSON.parse(localStorage.getItem(LOCAL_CAMPAIGN_KEY)||'null');if(local?.owner===from){local.owner=to;if(local.active?.checkpoint?.owner===from)local.active.checkpoint.owner=to;localStorage.setItem(LOCAL_CAMPAIGN_KEY,JSON.stringify(local));}}catch{}
+    });
+    $('guestPostScore')?.addEventListener('click',()=>showAccountGate('Create an account or sign in to post this run to the world leaderboard. Your guest progress on this device comes with you.'));
+    const accountInitialization=initializeAccounts(user=>{if(user&&!user.guest&&pendingGuestScore){const run=pendingGuestScore;pendingGuestScore=null;$('guestPostScore')?.classList.add('hidden');submitPartyScore(run);}if(user){$('settingCallsign').value=user.username;startCommunity(loadLeaderboard);if(!accountCheckPending)loadCampaignRecords();}else if(state.mode==='playing')pauseGame();}).finally(()=>{accountCheckPending=false;});
     setMissionTime(preferredTime,false);setAutoLock(preferredAutoLock,false,false);setGore(preferredGore,false);setOperation(preferredOperation,false);renderArsenal();renderDailyPanel();updateBestScore();loadCampaignRecords();initAssets();resize();setupTouch();render();runBootSplash();armMenuMusicOnGesture();sendTelemetry('loaded');requestAnimationFrame(frame);

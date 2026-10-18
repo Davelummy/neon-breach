@@ -397,7 +397,7 @@
     #bootSplash .splash-mark {
       width: 56px; height: 56px; margin: 0 auto 18px; border-radius: 14px;
       background: linear-gradient(145deg, #31f5db, #1a8f9a); box-shadow: 0 0 40px rgba(49,245,219,.35);
-      display: grid; place-items: center; font: 1000 22px/1 ui-sans-serif; color: #03100f;
+      display: grid; place-items: center; font: 1000 22px/1 Inter, ui-sans-serif, system-ui, sans-serif; color: #03100f;
     }
     #bootSplash b { display: block; font-size: 13px; letter-spacing: .42em; color: #eefcff; font-weight: 800; }
     #bootSplash span { display: block; margin-top: 10px; color: #6f8a92; font-size: 10px; letter-spacing: .28em; }
@@ -518,10 +518,21 @@
     #loadoutWeapon,#radioStation { max-width:100%;padding:10px;background:#0b1920;color:var(--ink);border:1px solid var(--cyan); }
     #arenaSelect { width:100%;padding:10px;background:#0b1920;color:var(--ink);border:1px solid var(--cyan); }
     #vehicleButton { position:absolute;right:18px;bottom:215px;pointer-events:auto;width:auto;max-width:220px;padding:12px;background:#15472e;border:1px solid #fff;color:#fff;font-size:12px;z-index:15; }
-    #accountGate { position:fixed;inset:0;z-index:65;display:grid;place-items:center;background:rgba(2,7,12,.97);overflow:auto;padding:20px; }
-    #accountGate .gate-card { width:min(440px,100%);padding:24px;border:1px solid var(--cyan);background:#0c1822; }
-    #accountGate label { display:block;margin:15px 0 6px; }
-    #accountGate input { display:block;width:100%;padding:12px;background:#061019;color:white;border:1px solid #6d8b94; }
+    /* Flex + auto margins centre the taller card without clipping its top on short screens. */
+    #accountGate { position:fixed;inset:0;z-index:65;display:flex;background:rgba(2,7,12,.97);overflow:auto;padding:20px; }    #accountGate .gate-card { width:min(440px,100%);margin:auto;padding:28px 24px;border:1px solid rgba(49,245,219,.28);background:linear-gradient(145deg,rgba(9,20,27,.96),rgba(4,10,15,.94));box-shadow:0 30px 80px rgba(0,0,0,.5),0 0 40px rgba(49,245,219,.08);clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px));animation:screen-in .4s ease both; }
+    #accountGate .gate-eyebrow { justify-content:center;margin-bottom:16px; }
+    #accountGate h2 { margin:0 0 8px;font-size:24px;font-style:italic; }
+    #accountGate .gate-hint { margin:8px 0 0;color:var(--muted);font-size:12.5px;line-height:1.5; }
+    #accountGate .gate-hint:empty { display:none; }
+    #accountGate .gate-reason { margin:0 0 14px;padding:10px 12px;border-left:2px solid var(--amber);background:rgba(255,187,85,.08);color:var(--ink);font-size:13px;line-height:1.45; }
+    #accountGate .gate-divider { display:flex;align-items:center;gap:12px;margin:22px 0 18px;color:var(--muted);font-size:10px;font-weight:900;letter-spacing:.2em;text-transform:uppercase; }
+    #accountGate .gate-divider::before,#accountGate .gate-divider::after { content:"";flex:1;height:1px;background:rgba(255,255,255,.12); }
+    #accountGate label { display:block;margin:14px 0 6px;color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase; }
+    #accountGate input { display:block;width:100%;padding:12px;background:#0a141a;color:var(--ink);border:1px solid rgba(255,255,255,.15); }
+    #accountGate input:focus-visible { outline:2px solid var(--cyan);outline-offset:1px;border-color:var(--cyan); }
+    #accountGate .gate-submit { width:100%;margin-top:14px;padding:14px;border:1px solid var(--cyan);background:rgba(49,245,219,.1);color:var(--cyan);font-size:11px;font-weight:900;letter-spacing:.18em;text-transform:uppercase;cursor:pointer; }
+    #accountGate .gate-submit:hover { background:rgba(49,245,219,.18); }
+    #accountGate .gate-submit:disabled { opacity:.5;cursor:progress; }
     #accountStatus,#emailStatus { color:var(--amber);min-height:24px; }
     .account-form { display:flex;gap:8px;flex-wrap:wrap;margin:12px 0; }
     .account-form input { flex:1;min-width:160px; }
@@ -604,6 +615,8 @@
     #menuRoot .difficulty, #menuRoot .time-select { margin-bottom: 8px; }
     .scroll-panel { max-height: min(48vh, 360px); overflow: auto; margin-top: 8px; }
     #version { left: 50%; transform: translateX(-50%); text-align: center; z-index: 3; }
+    /* Watermark belongs to the title screen; on scrolling inner screens it sat over buttons. */
+    #menuRoot:has(.menu-screen.active:not(#screenMain)) #version { display: none; }
 
     /* Leaderboard rows */
     .lb-row {
@@ -628,7 +641,7 @@
     .lb-row.top1 .lb-rank { color: #ffd257; text-shadow: 0 0 12px rgba(255,210,87,.5); }
     .lb-row.top2 .lb-rank { color: #c8d4d8; }
     .lb-row.top3 .lb-rank { color: #d08a5a; }
-    .lb-name { font: 800 12px/1.2 ui-sans-serif; letter-spacing: .08em; }
+    .lb-name { font: 800 12px/1.2 Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: .08em; }
     .lb-meta { display: block; margin-top: 3px; color: var(--muted); font: 700 9px/1.3 ui-monospace, monospace; letter-spacing: .06em; }
     .lb-score { font: 1000 14px/1 ui-monospace, monospace; color: var(--ink); }
     .share-row { display: flex; gap: 8px; margin-top: 12px; }
@@ -820,9 +833,10 @@
     #modalScreen::before,#modalScreen::after { display:none; }
     #modalScreen { height:100dvh; }
     .modal { min-width:0;max-height:calc(100dvh - 48px);overflow:auto;overflow-wrap:anywhere; }
-    #pausedMission { text-align:left; }
+    #pausedMission, #campaignViewOptions { text-align:left; }
     #shopWeapons button { min-height:48px;margin:0;white-space:normal;font-size:11px;letter-spacing:.04em;padding:10px; }
   </style>
+<link rel="stylesheet" href="/weapon-cards.css">
 </head>
 <body>
   <canvas id="game" aria-label="NEON BREACH first-person shooter game"></canvas>
@@ -902,15 +916,16 @@
       <div class="title-hero">
         <div class="eyebrow" style="justify-content:center">LUMMY LABS · TACTICAL FPS</div>
         <h1>NEON <em>BREACH</em></h1>
-        <p>Infiltrate. Breach. Extract. Compete on the leaderboard.</p>
+        <p>Infiltrate. Breach. Extract.</p>
       </div>
       <div class="menu-panel menu-stack">
         <div id="rotatePrompt"><b>More room in landscape</b><span id="screenModeStatus" role="status">Rotate your phone sideways, or try landscape fullscreen. You can also play in portrait.</span><div><button id="landscapeButton" class="secondary" type="button">Landscape / fullscreen</button><button id="portraitButton" class="secondary" type="button">Keep portrait</button></div></div>
         <p id="communityStatus" role="status" style="text-align:center;margin:0;font-size:12px;color:var(--muted)" title="Unique browser profiles; online means seen within 90 seconds. Clearing storage creates a new profile.">Checking player counts…</p>
-        <button class="primary" data-goto="screenOps">Play campaign</button>
-        <button id="continueButton" class="secondary hidden">Continue campaign</button>
+        <button id="continueButton" class="primary hidden">Continue</button>
+        <button class="primary" data-goto="screenOps">Play</button>
+        <button class="secondary" data-goto="screenLoadout">Loadout</button>
+        <button id="multiplayerButton" class="secondary" type="button">Multiplayer</button>
         <button class="secondary" data-goto="screenRanks">Leaderboard</button>
-        <button id="multiplayerButton" class="secondary" type="button">Multiplayer · Create / join room</button>
         <div id="mainAccount" hidden><span id="mainAccountName"></span><button id="mainLogout" class="secondary" type="button">Log out</button></div>
         <p id="accountActionStatus" role="status" style="margin:0;font-size:13px;text-align:center"></p>
         <details class="quiet-options"><summary>More</summary>
@@ -922,6 +937,16 @@
         </details>
       </div>
       <p style="margin:10px 0 0;text-align:center;font-size:11px;letter-spacing:.08em;color:rgba(148,178,205,.55)">VOICE AUDIO BY ELEVENLABS (ELEVENLABS.IO) · 3D BY THREE.JS</p>
+    </div>
+
+    <div id="screenLoadout" class="menu-screen">
+      <div class="menu-panel">
+        <h2>Loadout</h2>
+        <p class="sub">Compare weapons, inspect them in 3D, and choose what you take into the next mission.</p>
+        <p id="loadoutWallet" class="loadout-wallet" role="status"></p>
+        <div id="homeLoadoutCards" aria-label="Campaign loadout weapons"></div>
+        <button class="secondary" data-goto="screenMain">Back</button>
+      </div>
     </div>
 
     <div id="screenHow" class="menu-screen">
@@ -971,8 +996,9 @@
         <p id="missionPurpose" class="sub"></p>
         <details class="quiet-options"><summary>Mission route · what happens next</summary><ol id="missionPlan" style="padding-left:0;list-style:none;line-height:1.6;font-size:13px"></ol></details>
         <div class="selection-label"><label for="loadoutWeapon">Starting weapon</label></div>
-        <select id="loadoutWeapon" style="width:100%"></select>
-        <p id="loadoutHint" class="sub" style="margin:8px 0 14px">Choose your starting gun. Other unlocked guns remain available with 1–6 or weapon cycling. Daily challenges may fix the weapon.</p>
+        <div id="loadoutCards" aria-label="Starting weapon choices"></div>
+        <details class="quiet-options"><summary>Compact weapon list</summary><select id="loadoutWeapon" style="width:100%"></select></details>
+        <p id="loadoutHint" class="sub" style="margin:8px 0 14px" role="status">Inspect a gun, then select your starting weapon. Switch available guns with 1–6 or weapon cycling.</p>
         <div class="selection-label">Conditions</div>
         <div class="time-select">
           <button class="active" data-time="day">Day</button>
@@ -1091,6 +1117,7 @@
         <div id="campaignHistory" class="scroll-panel"></div>
         <div id="bestScoreTitle" class="micro" style="margin-top:10px">Best // 000000</div>
         <div class="campaign-head" style="margin-top:16px"><div class="micro">Unlocks</div><span id="careerStatus" class="micro">0 elims</span></div>
+        <div id="arsenalCards" aria-label="Weapon collection"></div>
         <div id="arsenalRows" class="scroll-panel"></div>
         <div class="campaign-head" style="margin-top:16px"><div class="micro">Medals</div></div>
         <div id="medalRows" class="scroll-panel"></div>
@@ -1106,7 +1133,7 @@
         <h2>Leaderboard</h2>
         <p class="sub">World and party boards · client-reported scores · updates every 30 seconds.</p>
         <div class="campaign-head"><div class="micro">Leaderboard</div><span id="leaderboardStatus">…</span></div>
-        <div id="rankOpFilter" class="difficulty" style="margin:10px 0 4px"></div>
+        <div id="rankOpFilter" class="difficulty" style="margin:10px 0 4px;grid-template-columns:repeat(4,1fr)"></div>
         <div class="rank-filters" style="display:flex;gap:12px;flex-wrap:wrap;margin:12px 0">
           <label>Period <select id="rankPeriod"><option value="all">All time</option><option value="daily">Today (UTC)</option><option value="weekly">Last 7 days (UTC)</option></select></label>
           <label>Difficulty <select id="rankDifficulty"><option value="all">All difficulties</option><option value="recruit">Recruit</option><option value="operative">Operative</option><option value="nightmare">Nightmare</option></select></label>
@@ -1168,6 +1195,7 @@
         <div style="grid-column:1/-1"><b id="resultMedals" style="font-size:11px;letter-spacing:.12em">NO MEDALS</b><span>MEDALS</span></div>
       </div>
       <p id="resultPublishStatus" class="sub hidden" role="status"></p>
+      <button id="guestPostScore" class="secondary hidden" type="button">Create account to post this score</button>
       <button id="resumeButton" class="primary">Resume</button>
       <button id="shareScoreButton" class="secondary hidden">Share score</button>
       <button id="downloadScoreButton" class="secondary hidden">Download scoreboard</button>
@@ -1186,14 +1214,19 @@
 
   <div id="accountGate" class="hidden" role="dialog" aria-modal="true" aria-labelledby="accountTitle">
     <div class="gate-card">
+      <div class="eyebrow gate-eyebrow">NEON BREACH</div>
+      <p id="accountReason" class="gate-reason" role="note" hidden></p>
+      <button id="accountGuest" class="primary" type="button">Play as guest</button>
+      <p class="gate-hint">No account needed. Campaign progress and unlocks save on this device.</p>
+      <div class="gate-divider"><span>or play online</span></div>
       <h2 id="accountTitle">Create your operative</h2>
-      <p>One unique username. No email required. This browser stays signed in for 30 days; use your username and password on another device.</p>
-      <p id="accountTransport" role="note"></p>
+      <p class="gate-hint">An account adds the world leaderboard, public results and multiplayer. One unique username, no email. Stay signed in for 30 days on this browser.</p>
+      <p id="accountTransport" class="gate-hint" role="note"></p>
       <form id="accountForm">
         <label for="accountUsername">Unique username</label><input id="accountUsername" name="username" autocomplete="username" pattern="[A-Za-z0-9_]{3,16}" minlength="3" maxlength="16" required>
         <label for="accountPassword">Password</label><input id="accountPassword" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
-        <p>At least 8 characters. Longer passphrases are welcome. Save it in your password manager. Your username stays reserved indefinitely.</p>
-        <button id="accountSubmit">Create account</button>
+        <p class="gate-hint">At least 8 characters. Save it in your password manager; recovery isn't available yet.</p>
+        <button id="accountSubmit" class="gate-submit">Create account</button>
       </form>
       <button id="accountSwitch" class="secondary">Already registered? Sign in</button>
       <p id="accountStatus" role="status" aria-live="polite"></p>
@@ -1203,7 +1236,7 @@
     <div class="gate-card">
       <div class="eyebrow" style="justify-content:center;margin-bottom:12px">WELCOME, OPERATIVE</div>
       <h2>Join the breach</h2>
-      <p>30 seconds and you’re in. Pick a callsign and a comfort level — you can change this later in Settings.</p>
+      <p>Pick a comfort level and you’re in. You can change it later in Settings.</p>
       <div class="field">
         <label for="welcomeCallsign">YOUR USERNAME</label>
         <input id="welcomeCallsign" type="text" maxlength="16" placeholder="YOUR USERNAME" autocomplete="nickname" spellcheck="false" readonly>
@@ -1253,15 +1286,16 @@
     <iframe id="multiplayerFrame" title="NEON BREACH multiplayer" allow="fullscreen; gamepad" style="display:block;width:100%;height:100%;border:0"></iframe>
   </dialog>
   <script type="module">
-    import {accountUser,showAccountGate} from '/accounts.js';
+    import {accountUser,isGuest,showAccountGate} from '/accounts.js';
+    const MULTIPLAYER_REASON='Multiplayer needs an account so other players can see who joined. Your guest progress on this device comes with you.';
     const panel=document.getElementById('multiplayerPanel'),frame=document.getElementById('multiplayerFrame'),button=document.getElementById('multiplayerButton');
     function closeMultiplayer(){frame.src='about:blank';panel.close();document.body.classList.remove('multiplayer-active');button.focus();const url=new URL(location.href);url.searchParams.delete('mode');url.searchParams.delete('room');history.replaceState(null,'',url);}
     function openMultiplayer(){if(panel.open)return;document.exitPointerLock?.();document.body.classList.add('multiplayer-active');panel.showModal();const url=new URL('/multiplayer.html',location.href);url.searchParams.set('embedded','1');const query=new URLSearchParams(location.search);if(query.has('qa'))url.searchParams.set('qa','1');if(query.has('room'))url.searchParams.set('room',query.get('room'));frame.src=url.href;frame.focus();}
-    button.addEventListener('click',()=>accountUser()?openMultiplayer():showAccountGate());
+    button.addEventListener('click',()=>accountUser()&&!isGuest()?openMultiplayer():showAccountGate(isGuest()?MULTIPLAYER_REASON:''));
     panel.addEventListener('cancel',event=>{event.preventDefault();/* Escape releases the mouse, not a live room. Use Leave room. */});
     addEventListener('message',event=>{if(event.origin!==location.origin||event.source!==frame.contentWindow)return;if(event.data?.type==='neon-multiplayer-leave')closeMultiplayer();if(event.data?.type==='neon-multiplayer-logout'){closeMultiplayer();document.getElementById('mainLogout').click();}});
     // Returning sessions and newly authenticated invites share one account gate.
-    function followInvite(){if(accountUser()&&new URLSearchParams(location.search).get('mode')==='multiplayer')openMultiplayer();}
+    function followInvite(){if(new URLSearchParams(location.search).get('mode')!=='multiplayer'||!accountUser())return;if(isGuest())showAccountGate(MULTIPLAYER_REASON);else openMultiplayer();}
     addEventListener('neon-account-changed',followInvite);followInvite();
   </script>
   <script type="module" src="/game.js"></script>

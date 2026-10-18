@@ -101,10 +101,10 @@ test('daily and weekly partitions cross UTC month boundaries', () => {
 
 test('difficulty-specific personal bests survive and period filtering precedes ranking', () => {
   const now = Date.UTC(2026, 9, 5, 12);
-  let board = upsertEntry([], { callsign: 'AA', score: 900, difficulty: 'recruit', at: now - 8 * 86400000 });
-  board = upsertEntry(board, { callsign: 'AA', score: 500, difficulty: 'nightmare', at: now });
+  let board = upsertEntry([], { callsign: 'AA', score: 900, kills: 1, difficulty: 'recruit', at: now - 8 * 86400000 });
+  board = upsertEntry(board, { callsign: 'AA', score: 500, kills: 1, difficulty: 'nightmare', at: now });
   assert.equal(board.length, 2);
-  const rows = [...board, { callsign: 'BB', score: 700, difficulty: 'nightmare', at: now - 86400000 }];
+  const rows = [...board, { callsign: 'BB', score: 700, kills: 1, difficulty: 'nightmare', at: now - 86400000 }];
   assert.equal(rankBoard(rows, { difficulty: 'nightmare' })[0].callsign, 'BB');
   assert.equal(rankBoard(rows, { period: 'daily', now })[0].callsign, 'AA');
   assert.equal(rankBoard(rows, { period: 'weekly', now }).length, 2);

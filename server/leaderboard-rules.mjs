@@ -24,6 +24,29 @@ export function sanitizePartyCode(value) {
   return clean.length >= 3 && clean.length <= 12 ? clean : '';
 }
 
+function plausibilityError({ score, kills, elapsed }) {
+  if (score <= 0) return 'Score must be positive.';
+  if (elapsed !== null && kills > KILL_SLACK + elapsed * MAX_KILLS_PER_SECOND) return 'Kill count exceeds plausible rate.';
+  if (score > 500 + kills * MAX_SCORE_PER_KILL + kills * MAX_FLAT_BONUS) return 'Score exceeds plausible maximum.';
+  return null;
+}
+
+/**
+ * Re-check a row already stored on a board. Rows written before submission
+ * validation existed may lack elapsed_seconds; those still face the
+ * score-per-kill ceiling but skip the kill-rate check.
+ */
+export function isPlausibleStoredEntry(row) {
+  if (!row || typeof row !== 'object') return false;
+  const score = Number(row.score), kills = Number(row.kills ?? 0);
+  if (!Number.isFinite(score) || !Number.isFinite(kills) || kills < 0) return false;
+  const hasElapsed = row.elapsed_seconds !== undefined && row.elapsed_seconds !== null;
+  const seconds = Number(row.elapsed_seconds);
+  if (hasElapsed && (!Number.isFinite(seconds) || seconds < 0)) return false;
+  const elapsed = hasElapsed ? Math.floor(seconds) : null;
+  return plausibilityError({ score: Math.floor(score), kills: Math.floor(kills), elapsed }) === null;
+}
+
 /**
  * Validate a score submission. Rejects (returns {ok:false}) when stats are
  * impossible; clamps cosmetic fields when ok.
@@ -36,12 +59,8 @@ export function validateScoreEntry(payload = {}) {
   const elapsed = Math.max(0, Math.min(86400, Math.floor(Number(payload.elapsed_seconds) || 0)));
   const kills = Math.max(0, Math.floor(Number(payload.kills) || 0));
   const score = Math.max(0, Math.floor(Number(payload.score) || 0));
-  const maxKills = KILL_SLACK + elapsed * MAX_KILLS_PER_SECOND;
-  const maxScore = 500 + kills * MAX_SCORE_PER_KILL + kills * MAX_FLAT_BONUS;
-
-  if (score <= 0) return { ok: false, error: 'Score must be positive.' };
-  if (kills > maxKills) return { ok: false, error: 'Kill count exceeds plausible rate.' };
-  if (score > maxScore) return { ok: false, error: 'Score exceeds plausible maximum.' };
+  const error = plausibilityError({ score, kills, elapsed });
+  if (error) return { ok: false, error };
 
   const difficulties = ['recruit', 'operative', 'nightmare'];
   const operation = Math.max(0, Math.min(9, Math.floor(Number(payload.operation) || 0)));
@@ -118,7 +137,8 @@ export function rankBoard(board, options = {}) {
       ? null
       : Math.max(0, Math.min(9, Math.floor(Number(options.operation))));
 
-  let list = Array.isArray(board) ? board.slice() : [];
+  // Stored rows may predate submission validation; never rank impossible ones.
+  let list = Array.isArray(board) ? board.filter(isPlausibleStoredEntry) : [];
   if (['recruit', 'operative', 'nightmare'].includes(options.difficulty)) {
     list = list.filter(row => (row.difficulty || 'operative') === options.difficulty);
   }

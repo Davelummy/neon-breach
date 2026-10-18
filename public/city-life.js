@@ -8,6 +8,13 @@ export function buyGun(wallet,index){
   const price=GUN_PRICES[index];if(wallet.credits<price)return false;
   wallet.credits-=price;wallet.owned.push(index);return true;
 }
+// Guest → account upgrade on the same device: keep both balances and every unlock.
+export function mergeWallets(storage,from,to){
+  const a=readWallet(storage,from),b=readWallet(storage,to);
+  const merged={credits:Math.min(1000000,a.credits+b.credits),owned:[...new Set([...b.owned,...a.owned])]};
+  try{storage?.setItem(`neon-wallet:${to}`,JSON.stringify(merged));storage?.removeItem(`neon-wallet:${from}`);}catch{}
+  return merged;
+}
 export function createCityLife(arena,passable,vehicles=[]){
   const hubs=arena==='jabi-lake'?[[35,35],[24,36],[12,37]]:arena==='millennium-park'?[[24,24],[36,24],[12,36]]:[[12,24],[24,12],[36,36]];
   const civilians=[];let shop=null;

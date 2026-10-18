@@ -5,7 +5,8 @@ import {
   sanitizePartyCode,
   validateScoreEntry,
   upsertEntry,
-  rankBoard
+  rankBoard,
+  isPlausibleStoredEntry
 } from '../server/leaderboard-rules.mjs';
 import {
   sanitizeProfileCode,
@@ -104,6 +105,32 @@ test('rankBoard dedupes per callsign and filters by operation', () => {
   assert.equal(op0[0].best_score, 200);
   assert.equal(op0[1].callsign, 'AA');
   assert.equal(op0[1].best_score, 100);
+});
+
+test('stored elapsed time cannot bypass kill-rate checks with zero or invalid values', () => {
+  assert.equal(isPlausibleStoredEntry({score:900,kills:60,elapsed_seconds:0}),false);
+  for(const elapsed_seconds of [-1,Infinity,'invalid'])assert.equal(isPlausibleStoredEntry({score:900,kills:60,elapsed_seconds}),false);
+  assert.equal(isPlausibleStoredEntry({score:900,kills:60}),true);
+});
+
+test('rankBoard drops stored entries that fail plausibility rules', () => {
+  const board = [
+    { callsign: 'CHEAT', score: 9999999, kills: 1, operation: 0, at: 1 },
+    { callsign: 'FAST', score: 900, kills: 60, elapsed_seconds: 5, operation: 0, at: 2 },
+    { callsign: 'BROKEN', score: 'lots', kills: 1, operation: 0, at: 3 },
+    // Legacy row without elapsed_seconds: kill-rate check is skipped, not failed.
+    { callsign: 'JASON', score: 12979, kills: 24, operation: 1, at: 4 },
+    { callsign: 'UNIT07', score: 999, kills: 3, elapsed_seconds: 120, operation: 0, at: 5 }
+  ];
+  const ranked = rankBoard(board);
+  assert.deepEqual(ranked.map(row => row.callsign), ['JASON', 'UNIT07']);
+  assert.equal(ranked[0].rank, 1);
+  assert.equal(isPlausibleStoredEntry(board[0]), false);
+  assert.equal(isPlausibleStoredEntry(board[3]), true);
+  // Anything validateScoreEntry accepts must also survive the read filter.
+  const accepted = validateScoreEntry({ callsign: 'OK', score: 21900, kills: 2, elapsed_seconds: 60 });
+  assert.equal(accepted.ok, true);
+  assert.equal(isPlausibleStoredEntry(accepted.entry), true);
 });
 
 test('sanitizeProfileCode and campaign career summary', () => {

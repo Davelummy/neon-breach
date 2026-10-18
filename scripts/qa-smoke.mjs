@@ -67,6 +67,20 @@ try {
   check('tactical HUD preference is saved',await page.evaluate(()=>document.body.dataset.hud==='tactical'&&JSON.parse(localStorage.getItem('neon-breach-interface')).hud==='tactical'));
   await page.click('#screenSettings [data-goto="screenMain"]');
   check('returning home restores the quiet primary menu',await page.$eval('#screenMain details',e=>!e.open));
+  await page.click('#screenMain [data-goto="screenLoadout"]');
+  await page.waitForSelector('#screenLoadout.active');
+  check('standalone visual loadout shows six weapons without a paid store',await page.evaluate(()=>document.querySelectorAll('#homeLoadoutCards .weapon-card').length===6&&!document.querySelector('[data-goto="screenVatarShop"]')));
+  await page.click('#homeLoadoutCards .weapon-picture');
+  await page.waitForSelector('#weaponPreviewDialog[open]');
+  await page.waitForSelector('#weaponPreviewCanvas');
+  check('3D weapon inspection leaves loadout unchanged',await page.evaluate(()=>document.getElementById('loadoutWeapon').value==='0'));
+  if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-weapon-preview.png')});
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(()=>!document.getElementById('weaponPreviewDialog').open);
+  await page.click('#homeLoadoutCards [data-weapon-action="1"]');
+  check('visual loadout selection persists without payment',await page.evaluate(()=>localStorage.getItem('neon-breach-loadout')==='1'&&document.querySelector('#homeLoadoutCards [data-weapon-index="1"]').classList.contains('is-selected')));
+  await page.click('#homeLoadoutCards [data-weapon-action="0"]');
+  await page.click('#screenLoadout [data-goto="screenMain"]');
 
   // Optional fast pass for portrait/landscape interactions; default remains the full suite.
   if(process.env.QA_MOBILE_ONLY!=='1'){
@@ -136,6 +150,14 @@ try {
   check('reinforcement routing avoids nearby and visible forward spawn positions',tactical.safeEntries&&tactical.count>0);
   await page.evaluate(()=>document.exitPointerLock?.());
   await page.waitForFunction(()=>!document.pointerLockElement);
+  await page.evaluate(()=>{window.__originalPointerLock=HTMLCanvasElement.prototype.requestPointerLock;HTMLCanvasElement.prototype.requestPointerLock=()=>Promise.reject(new DOMException('Denied for regression test','SecurityError'));});
+  const beforeDrag=await page.evaluate(()=>window.__NEON_3D__.frame().player.dir);
+  await page.mouse.move(600,350);await page.mouse.down();await page.mouse.move(760,350,{steps:6});await page.mouse.up();
+  const afterDrag=await page.evaluate(()=>window.__NEON_3D__.frame().player.dir);
+  check('trackpad primary drag turns when pointer lock is denied',Math.abs(afterDrag-beforeDrag)>.1);
+  await page.mouse.move(820,350,{steps:3});
+  check('releasing trackpad drag stops unlocked look',await page.evaluate(dir=>Math.abs(window.__NEON_3D__.frame().player.dir-dir)<.001,afterDrag));
+  await page.evaluate(()=>{HTMLCanvasElement.prototype.requestPointerLock=window.__originalPointerLock;delete window.__originalPointerLock;});
   check('on-foot radio is hidden and stopped without synthesized playback',await page.evaluate(()=>document.getElementById('gameRadio').hidden&&window.__NEON_QA__.radioStatus().state==='stopped'&&window.__NEON_QA__.radioStatus().synthSteps===0));
   await page.keyboard.press('n');
   check('radio shortcut does not start playback on foot',await page.evaluate(()=>window.__NEON_QA__.radioStatus().state==='stopped'));
@@ -241,6 +263,20 @@ try {
     await page.screenshot({ path: process.env.SMOKE_SHOT || 'smoke-gameplay.png' });
   }
 
+  // Victory: park a vehicle on the First Strike beacon and require the full debrief + both POSTs.
+  await page.evaluate(()=>window.__NEON_QA__.setFlight(false));
+  const posted=path=>page.waitForResponse(r=>new URL(r.url()).pathname===path&&r.request().method()==='POST',{timeout:20000}).catch(()=>null);
+  const [resultPost,boardPost]=[posted('/api/results'),posted('/api/leaderboard')];
+  check('QA hook parks a vehicle on the extraction beacon',await page.evaluate(()=>window.__NEON_QA__.completeExtraction()));
+  await waitForState(page,()=>window.__NEON_QA__.snapshot().mode==='victory'&&!document.getElementById('modalScreen').classList.contains('hidden'),15000);
+  check('First Strike reaches the MISSION COMPLETE debrief',await page.evaluate(()=>document.getElementById('modalEyebrow').textContent==='MISSION COMPLETE'&&window.__NEON_QA__.snapshot().operation===0));
+  const [resultResponse,boardResponse]=await Promise.all([resultPost,boardPost]);
+  check('victory publishes its public result',!!resultResponse?.ok(),`status=${resultResponse?.status()}`);
+  check('victory posts to the leaderboard',!!boardResponse?.ok(),`status=${boardResponse?.status()}`);
+  await waitForState(page,()=>/leaderboard updated/i.test(document.getElementById('resultPublishStatus').textContent),10000);
+  check('debrief confirms the leaderboard update',true);
+  if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-victory.png')});
+
   // Explicit compatibility mode: this is the only path allowed to use Canvas.
   await page.goto(`http://127.0.0.1:${PORT}/?qa&renderer=compat`, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await waitForState(page, () => Boolean(window.__NEON_QA__), 10000);
@@ -267,10 +303,12 @@ try {
   await page.keyboard.press('KeyB');await waitForState(page,()=>document.body.classList.contains('nvg-active'));await page.keyboard.press('KeyB');await waitForState(page,()=>!document.body.classList.contains('nvg-active'));check('night vision is an explicit reversible control',true);
   await page.keyboard.press('KeyV');await waitForState(page,()=>window.__NEON_RENDER_STATS__().localPlayerVisible);check('third person submits a visible player model',true);if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-third-person.png')});await page.keyboard.press('KeyV');await waitForState(page,()=>!window.__NEON_RENDER_STATS__().localPlayerVisible);
   await page.keyboard.press('Escape');await page.select('#campaignTime','day');await page.keyboard.press('Escape');await waitForState(page,()=>window.__NEON_QA__.snapshot().mode==='playing'&&window.__NEON_QA__.snapshot().timeOfDay==='day');check('Night Raptor campaign can switch to daylight without restarting',true);
-  check('civilian routes and armory render in the campaign',await page.evaluate(()=>window.__NEON_RENDER_STATS__().civilianCount>=6&&window.__NEON_RENDER_STATS__().shopVisible));
+  // Simulation resumes before the next Three.js frame updates scene visibility.
+  await waitForState(page,()=>window.__NEON_RENDER_STATS__().civilianCount>=6&&window.__NEON_RENDER_STATS__().shopVisible);
+  check('civilian routes and armory render in the campaign',true);
   await page.evaluate(()=>window.__NEON_QA__.equipWeapon(3));check('unearned unpurchased marksman rifle remains locked',await page.evaluate(()=>window.__NEON_QA__.snapshot().weapon!=='dmr'));
   await page.evaluate(async()=>{const p=window.__NEON_3D__.frame().gunShop;window.__NEON_QA__.teleport(p.x,p.y);const {accountUser}=await import('/accounts.js');localStorage.setItem(`neon-wallet:${accountUser().id}`,JSON.stringify({credits:300,owned:[]}));});
-  await page.keyboard.press('KeyE');await waitForState(page,()=>!document.getElementById('gunShopPanel').hidden);await page.evaluate(()=>document.querySelectorAll('#shopWeapons button')[3].click());check('armory spends earned credits and equips purchased marksman rifle',await page.evaluate(()=>window.__NEON_QA__.snapshot().weapon==='dmr'&&document.getElementById('shopBalance').textContent.startsWith('60 earned')));if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-armory.png')});await page.keyboard.press('Escape');
+  await page.keyboard.press('KeyE');await waitForState(page,()=>!document.getElementById('gunShopPanel').hidden);await page.evaluate(()=>document.querySelector('#shopWeapons [data-weapon-action="3"]').click());check('armory spends earned credits and equips purchased marksman rifle',await page.evaluate(()=>window.__NEON_QA__.snapshot().weapon==='dmr'&&document.getElementById('shopBalance').textContent.startsWith('60 earned')));if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-armory.png')});await page.keyboard.press('Escape');
   check('operation 2 has its own objective', op2.objective === 'REACH THE EASTERN RELAY POST', op2.objective);
   await page.evaluate(() => { window.__NEON_QA__.setInvulnerable(true); });
   for (let stage = 0; stage < 4; stage++) {

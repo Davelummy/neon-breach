@@ -23,7 +23,7 @@ try{
     await page.waitForFunction(()=>Boolean(window.__NEON_QA__)&&document.getElementById('accountGate').classList.contains('hidden'),{timeout:60000});
     await page.evaluate(()=>document.getElementById('welcomeGate').classList.add('hidden'));
     await page.evaluate(()=>{document.getElementById('menuRoot').scrollTop=0;document.querySelector('[data-goto="screenMain"]').click();});
-    for(const screen of ['screenMain','screenDeploy','screenSettings','screenRanks']){
+    for(const screen of ['screenMain','screenLoadout','screenDeploy','screenSettings','screenRanks']){
       await page.evaluate(id=>document.querySelector(`[data-goto="${id}"]`).click(),screen);
       if(screen==='screenSettings')await page.evaluate(()=>document.getElementById('interfaceSettings').open=true);
       const failures=await page.evaluate(()=>{

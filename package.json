@@ -11,6 +11,7 @@
     "qa": "node scripts/qa-smoke.mjs",
     "qa:responsive": "node scripts/qa-responsive.mjs",
     "qa:multiplayer": "node scripts/qa-multiplayer.mjs",
+    "qa:guest": "node scripts/qa-guest.mjs",
     "verify": "npm test && npm run qa",
     "blender:check": "node scripts/blender/run-healthcheck.mjs",
     "mcp:check": "node scripts/check-mcp-prereqs.mjs",
