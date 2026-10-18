@@ -88,8 +88,9 @@ stream failures do not trigger an automatic retry loop.
 
 ### Touch
 
-- Left thumb area: move stick, with **RUN** and **CROUCH** toggles beside or above it (no menu needed).
-- Right thumb area: Fire, Aim, Jet, Reload; the round drive / exit icon docks next to them.
+- Left thumb: the move stick only. Push it fully forward to run (the RUN marker above it lights up).
+- Right thumb: an arc of FIRE, CROUCH (slides while running), Reload, Aim and Jet, with the round drive / exit icon above. Tap the weapon name to switch guns.
+- Controls and readouts keep clear of the iPhone notch and home bar.
 - Minimap, vitals and pop-up messages stay at the screen edges so the centre of the view is clear.
 
 ### Ammunition

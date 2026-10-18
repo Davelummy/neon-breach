@@ -1303,7 +1303,7 @@ let accountCheckPending=true;
         state.missionProgress=Math.max(0,1-dist/(def.range||16));
         if(dist<(def.radius||1.45))advanceMission();
         else if(def.tutorial&&state.tutorialStep<4){
-          if(state.tutorialStep===0&&state.totalTime>3){state.tutorialStep=1;showComms('Hint',state.touch?'Left thumb moves · right thumb looks. Scout the marker and use cover.':'WASD move · mouse look. Scout the marker and use cover.',4.5);}
+          if(state.tutorialStep===0&&state.totalTime>3){state.tutorialStep=1;showComms('Hint',state.touch?'Left thumb moves · push it fully forward to run · right thumb looks. Scout the marker and use cover.':'WASD move · mouse look. Scout the marker and use cover.',4.5);}
           else if(state.tutorialStep===1&&(player.shots>0||state.totalTime>12)){state.tutorialStep=2;showComms('Hint',state.touch?'Aim before firing. Tap AIM and stop moving for tighter shots; Reload behind cover.':'RMB aim · R reload. Stop moving for tighter shots; reload behind cover.',4.5);}
           else if(state.tutorialStep===2&&state.enemies.some(e=>e.dead)){state.tutorialStep=3;showComms('Hint','F for close finishers. Chains raise score.',4);}
           else if(state.tutorialStep===3&&state.takedowns>0){state.tutorialStep=4;showComms('Hint','E enters vehicles near extraction.',4);}
@@ -1388,7 +1388,7 @@ let accountCheckPending=true;
         if(!exit){showMessage('EXIT BLOCKED · MOVE THE VEHICLE INTO OPEN SPACE');return;}player.x=exit.x;player.y=exit.y;player.z=GROUND_HEIGHT;player.carIndex=-1;car.occupied=false;car.speed=0;startGameplayRadio();audio?.vehicle();showMessage(`EXITED ${car.name}`);rumble(.12,.18,60);return;
       }
       const nearest=nearbyVehicle();
-      if(nearest<0){showMessage(state.touch&&!activeGamepad?'MOVE BESIDE A VEHICLE · THEN TAP DRIVE':'MOVE BESIDE A VEHICLE · E / HOLD □ / DRIVE BUTTON');return;}const car=state.cars[nearest];car.occupied=true;player.carIndex=nearest;input.sprint=false;player.crouchToggle=false;player.x=car.x;player.y=car.y;player.z=.62;player.vz=0;player.grounded=true;player.dir=car.dir;liveRadio.prime();startGameplayRadio();autoTuneRadio();$('touchExtras').hidden=true;$('touchMoreButton').setAttribute('aria-expanded','false');audio?.vehicle();showMessage(`${car.name} · ${state.touch&&!activeGamepad?'TAP EXIT TO GET OUT':'E / ○ EXIT'}`);rumble(.16,.25,90);
+      if(nearest<0){showMessage(state.touch&&!activeGamepad?'MOVE BESIDE A VEHICLE · THEN TAP DRIVE':'MOVE BESIDE A VEHICLE · E / HOLD □ / DRIVE BUTTON');return;}const car=state.cars[nearest];car.occupied=true;player.carIndex=nearest;input.sprint=input.touchSprint=false;player.crouchToggle=false;player.x=car.x;player.y=car.y;player.z=.62;player.vz=0;player.grounded=true;player.dir=car.dir;liveRadio.prime();startGameplayRadio();autoTuneRadio();$('touchExtras').hidden=true;$('touchMoreButton').setAttribute('aria-expanded','false');audio?.vehicle();showMessage(`${car.name} · ${state.touch&&!activeGamepad?'TAP EXIT TO GET OUT':'E / ○ EXIT'}`);rumble(.16,.25,90);
     }
     function nearbyVehicle(){let nearest=-1,best=1.6;if(Math.abs(player.z-GROUND_HEIGHT)>.85)return -1;for(let i=0;i<state.cars.length;i++){const car=state.cars[i],distance=vehicleDistance(car,player.x,player.y);if(car.destroyed||car.occupied||distance>=best)continue;if(!lineOfSight(player.x,player.y,car.x,car.y,player.z))continue;const mx=(player.x+car.x)/2,my=(player.y+car.y)/2;if(coverAt(mx,my))continue;best=distance;nearest=i;}return nearest;}
 
@@ -1524,7 +1524,7 @@ let accountCheckPending=true;
       player.strafe+=(s-player.strafe)*Math.min(1,dt*8);
       // Stance: crouch toggles (C / Circle / touch) or holds (Ctrl). Crouching from a sprint starts a slide.
       player.slideCooldown=Math.max(0,player.slideCooldown-dt);
-      const sprintHeld=input.sprint||input.gamepadSprint;
+      const sprintHeld=input.sprint||input.gamepadSprint||input.touchSprint;
       if(player.carIndex>=0){player.crouchToggle=false;player.slideTimer=0;}
       // Sprinting stands a settled crouch back up (not a fresh press, and not mid-slide).
       if(sprintHeld&&player.crouchToggle&&player.wasCrouch&&player.slideTimer<=0&&!player.wasSliding)player.crouchToggle=false;
@@ -1612,9 +1612,9 @@ let accountCheckPending=true;
       if(player.carIndex<0&&(input.fire||input.gamepadFire)&&!player.reloading&&player.fireCooldown<=0)shoot();
     }
 
-    // Touch RUN/CROUCH mirror keyboard, pad and auto-cancel state; write the DOM only on change.
+    // Touch RUN cue / CROUCH mirror keyboard, pad, stick and auto-cancel state; write the DOM only on change.
     let movementButtonKey='';
-    function syncMovementButtons(){const run=!!input.sprint&&player.carIndex<0,crouch=!!(player.crouchToggle||input.crouchHold)&&player.carIndex<0,key=`${run}${crouch}`;if(key===movementButtonKey)return;movementButtonKey=key;$('sprintButton')?.setAttribute('aria-pressed',String(run));$('crouchButton')?.setAttribute('aria-pressed',String(crouch));}
+    function syncMovementButtons(){const run=!!(input.sprint||input.touchSprint)&&player.carIndex<0,crouch=!!(player.crouchToggle||input.crouchHold)&&player.carIndex<0,key=`${run}${crouch}`;if(key===movementButtonKey)return;movementButtonKey=key;$('sprintCue')?.classList.toggle('on',run);$('crouchButton')?.setAttribute('aria-pressed',String(crouch));}
     function toggleCrouch(){if(state.mode!=='playing'||player.carIndex>=0)return;input.sprint=false;player.crouchToggle=!player.crouchToggle;syncMovementButtons();}
     function startJump(){
       if(state.mode!=='playing')return;
@@ -1800,7 +1800,7 @@ let accountCheckPending=true;
     }
 
     function updateEnemies(dt){
-      const diff=DIFFICULTIES[state.difficulty],rules=opRules(),sprinting=input.sprint||input.gamepadSprint,quiet=(state.timeOfDay==='night'||rules.stealth)&&!sprinting&&state.muzzle<=0&&player.carIndex<0;
+      const diff=DIFFICULTIES[state.difficulty],rules=opRules(),sprinting=input.sprint||input.gamepadSprint||input.touchSprint,quiet=(state.timeOfDay==='night'||rules.stealth)&&!sprinting&&state.muzzle<=0&&player.carIndex<0;
       const baseSight=state.timeOfDay==='day'?(rules.sightDay||12.5):(quiet?(rules.sightNight||6.4)*.85:(rules.sightNight||9.2));
       const crouched=player.carIndex<0&&player.crouch>.6&&player.slideTimer<=0,sightRange=baseSight*(crouched?.78:1);state.squadAlert=Math.max(0,state.squadAlert-dt*(quiet?1.4:1));
       for(const e of state.enemies){
@@ -2208,7 +2208,8 @@ let accountCheckPending=true;
       while(host.childElementCount>=6)host.firstElementChild.remove();
       const el=document.createElement('span');el.className=`damage-number${kill?' kill':critical?' critical':''}`;el.textContent=String(Math.round(amount));
       el.style.left=`${18+Math.random()*26}px`;el.style.top=`${-12-Math.random()*16}px`;
-      el.addEventListener('animationend',()=>el.remove(),{once:true});host.append(el);
+      // A timer, not animationend: Reduce Motion disables the rise animation, so the event never fires.
+      el.addEventListener('animationend',()=>el.remove(),{once:true});setTimeout(()=>el.remove(),760);host.append(el);
     }
     function pushKillFeed(e,method){
       const feed=$('killFeed');if(!feed)return;const spec=ENEMY_TYPES[e.type];
@@ -2761,20 +2762,20 @@ let accountCheckPending=true;
     function setupTouch(){
       if(!coarsePointer)return;const joy=$('joystickZone'),knob=$('joystickKnob'),look=$('lookZone');let joyId=null,lookId=null,lastLook={x:0,y:0};
       $('objectiveBox').appendChild($('missionComms'));
-      resetTouchInputs=()=>{joyId=lookId=null;lastLook={x:0,y:0};moveAxis={x:0,y:0};input.pointerFire=input.sprint=input.jump=false;syncFire();knob.style.transform='translate(0,0)';};
+      resetTouchInputs=()=>{joyId=lookId=null;lastLook={x:0,y:0};moveAxis={x:0,y:0};input.pointerFire=input.sprint=input.touchSprint=input.jump=false;syncFire();knob.style.transform='translate(0,0)';};
       joy.addEventListener('pointerdown',e=>{joyId=e.pointerId;joy.setPointerCapture(e.pointerId);updateJoy(e);});
       joy.addEventListener('pointermove',e=>{if(e.pointerId===joyId)updateJoy(e);});
-      const endJoy=e=>{if(e.pointerId===joyId){joyId=null;moveAxis={x:0,y:0};knob.style.transform='translate(0,0)';}};joy.addEventListener('pointerup',endJoy);joy.addEventListener('pointercancel',endJoy);
-      function updateJoy(e){const r=joy.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,dx=e.clientX-cx,dy=e.clientY-cy,len=Math.hypot(dx,dy),max=42,k=Math.min(1,max/Math.max(max,len));moveAxis={x:dx/max*k,y:dy/max*k};knob.style.transform=`translate(${dx*k}px,${dy*k}px)`;}
+      const endJoy=e=>{if(e.pointerId===joyId){joyId=null;moveAxis={x:0,y:0};input.touchSprint=false;knob.style.transform='translate(0,0)';}};joy.addEventListener('pointerup',endJoy);joy.addEventListener('pointercancel',endJoy);
+      function updateJoy(e){const r=joy.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,dx=e.clientX-cx,dy=e.clientY-cy,len=Math.hypot(dx,dy),max=42,k=Math.min(1,max/Math.max(max,len));moveAxis={x:dx/max*k,y:dy/max*k};knob.style.transform=`translate(${dx*k}px,${dy*k}px)`;const forward=-dy/max,run=player.carIndex<0&&forward>=.9&&Math.abs(dx)<-dy*.7;if(run&&!input.touchSprint)player.crouchToggle=false;input.touchSprint=run;}
       look.addEventListener('pointerdown',e=>{lookId=e.pointerId;lastLook={x:e.clientX,y:e.clientY};look.setPointerCapture(e.pointerId);});
       look.addEventListener('pointermove',e=>{if(e.pointerId!==lookId||state.mode!=='playing')return;const dx=e.clientX-lastLook.x,dy=e.clientY-lastLook.y;lastLook={x:e.clientX,y:e.clientY};const sens=lookScale(),inv=pitchSign();turnLook(dx*.006*sens);player.pitch=Math.max(-canvas.height*.2,Math.min(canvas.height*.2,player.pitch-dy*.85*sens*inv));});
       const endLook=e=>{if(e.pointerId===lookId)lookId=null;};look.addEventListener('pointerup',endLook);look.addEventListener('pointercancel',endLook);
       const fire=$('fireButton');fire.addEventListener('pointerdown',e=>{e.preventDefault();input.pointerFire=true;syncFire();fire.setPointerCapture(e.pointerId);});fire.addEventListener('pointerup',()=>{input.pointerFire=false;syncFire();});fire.addEventListener('pointercancel',()=>{input.pointerFire=false;syncFire();});
       $('reloadButton').addEventListener('pointerdown',e=>{e.preventDefault();reload();});
       $('weaponButton').addEventListener('pointerdown',e=>{e.preventDefault();cycleWeapon(1);});
+      const readout=document.querySelector('#hud .bottom-right');readout.setAttribute('role','button');readout.setAttribute('aria-label','Switch weapon');readout.addEventListener('pointerdown',e=>{if(player.carIndex>=0)return;e.preventDefault();cycleWeapon(1);});
       $('meleeButton').addEventListener('pointerdown',e=>{e.preventDefault();meleeTakedown();});
       $('crouchButton')?.addEventListener('pointerdown',e=>{e.preventDefault();toggleCrouch();});
-      const sprint=$('sprintButton');sprint.addEventListener('pointerdown',e=>{e.preventDefault();if(player.carIndex>=0||state.mode!=='playing')return;input.sprint=!input.sprint;if(input.sprint)player.crouchToggle=false;syncMovementButtons();});
       const jet=$('jetButton');jet.addEventListener('pointerdown',e=>{e.preventDefault();input.jump=true;startJump();jet.setPointerCapture(e.pointerId);});jet.addEventListener('pointerup',()=>input.jump=false);jet.addEventListener('pointercancel',()=>input.jump=false);
       const ads=$('adsButton');ads.addEventListener('pointerdown',e=>{e.preventDefault();input.aim=!input.aim;ads.setAttribute('aria-pressed',String(input.aim));});
       $('lockButton').addEventListener('pointerdown',e=>{e.preventDefault();toggleAutoLock();});
@@ -2832,7 +2833,7 @@ let accountCheckPending=true;
         besideVehicle:(index=0)=>{const car=state.cars[index];for(const offset of [Math.PI/2,-Math.PI/2,0,Math.PI]){const x=car.x+Math.cos(car.dir+offset)*1.5,y=car.y+Math.sin(car.dir+offset)*1.5;if(canMove(x,y,.24)&&!carBlocked(x,y,.24)){player.x=x;player.y=y;player.z=GROUND_HEIGHT;player.grounded=true;player.vz=0;player.moveVx=player.moveVy=0;return true;}}return false;},
         radioStatus:()=>({...liveRadio.status(),station:radioStation,volume:radioVolume,muted:state.muted,vehicle:state.cars[player.carIndex]?.kind||null,synthSteps:audio?.radioStep||0}),
         vehicleCamera:()=>{const cam=getRenderCamera(),car=state.cars[player.carIndex];return car?{clearance:vehicleDistance(car,cam.x,cam.y),eyeHeight:cam.z+.72,roofHeight:vehicleBounds(car).height}:null;},
-        touchInput:()=>({x:moveAxis.x,y:moveAxis.y,fire:input.pointerFire,aim:input.aim,sprint:input.sprint,jump:input.jump}),
+        touchInput:()=>({x:moveAxis.x,y:moveAxis.y,fire:input.pointerFire,aim:input.aim,sprint:input.sprint||input.touchSprint,jump:input.jump}),
         worldSnapshot:()=>({arena:state.arenaId,layoutVersion:state.layoutVersion,cells:map.map(row=>row.slice()),cars:state.cars.map(c=>({kind:c.kind,color:c.color,name:c.name,x:c.x,y:c.y,hp:c.hp,destroyed:!!c.destroyed}))}),
         prepareDestructionTest:()=>{state.enemies=[];state.projectiles=[];player.carIndex=-1;for(const car of state.cars)car.occupied=false;const car=state.cars[6];car.x=12;car.y=36;car.dir=0;car.hp=car.maxHp=vehicleIntegrity(car.kind);car.destroyed=false;Object.assign(player,{x:8,y:36,z:GROUND_HEIGHT,dir:0,pitch:0,recoil:0,recoilKick:0,recoilYaw:0,swayX:0,swayY:0,fireCooldown:0});setAutoLock(false,false,false);equipWeapon(0,true);},
         fireTestRound:()=>{player.ammo=Math.max(1,player.ammo);player.recoil=player.recoilKick=player.recoilYaw=player.pitch=player.swayX=player.swayY=0;player.dir=0;shoot();},

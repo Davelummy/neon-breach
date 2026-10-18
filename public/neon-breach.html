@@ -847,11 +847,6 @@
     #adsButton { right:max(104px,calc(env(safe-area-inset-right) + 104px));bottom:max(110px,calc(env(safe-area-inset-bottom) + 110px));width:52px;height:52px; }
     body.in-vehicle #adsButton { display:block; }
     .setting-row label { line-height:1.4; }
-    #movementActions{position:absolute;left:max(16px,env(safe-area-inset-left));bottom:max(170px,calc(env(safe-area-inset-bottom) + 170px));display:flex;gap:8px;pointer-events:auto}
-    #movementActions .touch-btn{position:static;width:60px;height:52px;font-size:10px;touch-action:manipulation}
-    #movementActions [aria-pressed="true"]{color:#03100f;background:var(--cyan);border-color:var(--cyan)}
-    body.in-vehicle #movementActions{display:none}
-    @media(pointer:coarse) and (max-width:360px) and (min-height:441px){#movementActions{bottom:max(152px,calc(env(safe-area-inset-bottom) + 152px))}#movementActions .touch-btn{width:52px;height:46px}}
     /* Readouts live at the screen edges so RUN/CROUCH and the drive icon never push them into the play view. */
     @media(pointer:coarse) and (orientation:portrait){body:not(.in-vehicle) #hud .bottom-left{top:max(82px,calc(env(safe-area-inset-top) + 82px));bottom:auto;left:max(10px,env(safe-area-inset-left))}body.in-vehicle #hud .bottom-left{bottom:max(160px,calc(env(safe-area-inset-bottom) + 160px))}body #hud .bottom-right{top:max(212px,calc(env(safe-area-inset-top) + 212px));bottom:auto;right:max(12px,env(safe-area-inset-right));max-width:calc(30vw - 12px)}}
     @media(pointer:coarse) and (orientation:portrait) and (max-width:340px){body #hud .bottom-left{width:84px}}
@@ -862,9 +857,8 @@
     @media(pointer:coarse) and (orientation:portrait) and (max-width:600px){body.in-vehicle #hud #message{top:max(128px,calc(env(safe-area-inset-top) + 128px))}}
     @media(pointer:coarse) and (orientation:landscape) and (min-height:441px){body #hud #message{top:max(84px,calc(env(safe-area-inset-top) + 84px));bottom:auto}}
     @media(pointer:coarse) and (max-height:440px) and (max-width:600px){body #hud #objectiveBox{max-width:260px}body #hud #message{top:max(12px,env(safe-area-inset-top));left:280px;max-width:calc(100% - 430px)}}
-    @media(pointer:coarse) and (orientation:landscape) and (min-height:441px){body:not(.in-vehicle) #hud .bottom-left{bottom:max(238px,calc(env(safe-area-inset-bottom) + 238px))}}
     @media(pointer:coarse) and (max-height:440px) and (max-width:600px){body:not(.in-vehicle) #hud .bottom-left{width:72px}}
-    @media(pointer:coarse) and (max-height:440px){#movementActions{left:164px;bottom:max(20px,env(safe-area-inset-bottom))}#movementActions .touch-btn{width:56px;height:48px}body:not(.in-vehicle) #hud .bottom-left{top:max(82px,calc(env(safe-area-inset-top) + 82px));bottom:auto;left:calc(max(12px,env(safe-area-inset-left)) + 84px)}}
+    @media(pointer:coarse) and (max-height:440px){body:not(.in-vehicle) #hud .bottom-left{top:max(82px,calc(env(safe-area-inset-top) + 82px));bottom:auto;left:calc(max(12px,env(safe-area-inset-left)) + 84px)}}
     #menuRoot button:focus-visible,#menuRoot select:focus-visible,#menuRoot input:focus-visible { outline:2px solid var(--cyan);outline-offset:3px; }
     @media(max-width:760px),(pointer:coarse) {
       #hud #weaponName { display:block!important;font-size:10px;max-width:140px; }
@@ -885,6 +879,56 @@
     .guest-board-note p { margin:0;color:var(--ink);font-size:12.5px;line-height:1.45; }
     .guest-board-note button { margin-top:8px; }
     #shopWeapons button { min-height:48px;margin:0;white-space:normal;font-size:11px;letter-spacing:.04em;padding:10px; }
+    /* Touch layout. Left thumb: stick only (push fully forward to run). Right thumb: an arc around FIRE.
+       Every offset includes the notch / home-bar insets so nothing hides behind them on real phones. */
+    #sprintCue { display:none; }
+    @media (pointer:coarse) {
+      :root { --tl:max(14px,env(safe-area-inset-left));--tr:max(12px,env(safe-area-inset-right));--tb:max(14px,env(safe-area-inset-bottom));--tt:max(12px,env(safe-area-inset-top)); }
+      #touchControls #joystickZone { left:var(--tl);bottom:var(--tb);overflow:visible; }
+      #sprintCue { display:block;position:absolute;left:50%;top:-22px;transform:translateX(-50%);padding:2px 8px;border-radius:9px;font:800 9px/1.4 system-ui;letter-spacing:.12em;color:rgba(220,235,231,.55);border:1px solid rgba(220,235,231,.25);background:rgba(4,12,18,.45);pointer-events:none; }
+      #sprintCue::before { content:'▲ '; }
+      #sprintCue.on { color:#03100f;background:var(--cyan);border-color:var(--cyan); }
+      #touchControls #fireButton { left:auto;top:auto;right:calc(var(--tr) + 8px);bottom:calc(var(--tb) + 8px);width:72px;height:72px; }
+      #touchControls #crouchButton { position:absolute;left:auto;top:auto;right:calc(var(--tr) + 92px);bottom:calc(var(--tb) + 4px);width:58px;height:52px;font-size:10px;touch-action:manipulation; }
+      #touchControls #crouchButton[aria-pressed="true"] { color:#03100f;background:var(--cyan);border-color:var(--cyan); }
+      #touchControls #reloadButton { left:auto;top:auto;right:calc(var(--tr) + 96px);bottom:calc(var(--tb) + 66px);width:48px;height:48px; }
+      #touchControls #adsButton { left:auto;top:auto;right:calc(var(--tr) + 74px);bottom:calc(var(--tb) + 124px);width:52px;height:52px; }
+      #touchControls #jetButton { left:auto;top:auto;right:calc(var(--tr) + 10px);bottom:calc(var(--tb) + 96px);width:52px;height:52px; }
+      #touchControls #pauseButton { left:auto;bottom:auto;right:var(--tr);top:var(--tt); }
+      #touchControls #touchMoreButton { left:auto;bottom:auto;right:var(--tr);top:calc(var(--tt) + 54px); }
+      #touchControls #touchExtras { right:calc(var(--tr) + 60px);top:calc(var(--tt) + 54px); }
+      body #hud #vehicleButton { left:auto;top:auto;transform:none;right:calc(var(--tr) + 6px);bottom:calc(var(--tb) + 158px);width:56px!important;height:56px; }
+      body.in-vehicle #crouchButton { display:none!important; }
+      #hud .bottom-right { pointer-events:auto;cursor:pointer;touch-action:manipulation; }
+      body:not(.in-vehicle) #hud .bottom-right::before { content:'⇄ TAP TO SWITCH';display:block;font-size:8px;letter-spacing:.1em;color:var(--muted); }
+      #gameRadio { left:var(--tl); }
+    }
+    @media (pointer:coarse) and (orientation:landscape) {
+      body #hud .bottom-right { right:calc(var(--tr) + 160px);bottom:var(--tb);top:auto; }
+      body.in-vehicle #hud .bottom-left { left:calc(var(--tl) + 150px);bottom:var(--tb); }
+    }
+    @media (pointer:coarse) and (max-height:440px) {
+      body:not(.in-vehicle) #hud .bottom-left { left:calc(var(--tl) + 84px); }
+      body #hud #message { left:calc(var(--tl) + 196px);max-width:calc(100% - var(--tl) - var(--tr) - 340px); }
+      #gameRadio { top:calc(var(--tt) + 64px); }
+    }
+    @media (pointer:coarse) and (max-height:360px) {
+      #touchControls #touchMoreButton { top:var(--tt);right:calc(var(--tr) + 56px); }
+      #touchControls #touchExtras { top:calc(var(--tt) + 54px);right:var(--tr); }
+      body.in-vehicle #hud #radarWrap { right:calc(var(--tr) + 112px); }
+      body.in-vehicle #hud #objectiveBox { right:calc(var(--tr) + 192px); }
+      /* No free strip on 320px-tall screens: the brief pop-up covers the objective banner, never the view. */
+      body #hud #message { top:var(--tt);left:var(--tl);max-width:260px;z-index:6;background:rgba(2,5,9,.94); }
+    }
+    @media (pointer:coarse) and (orientation:portrait) {
+      #hud #radarWrap { top:calc(var(--tt) + 112px); }
+      #gameRadio { top:calc(var(--tt) + 64px); }
+      body:not(.in-vehicle) #hud .bottom-left { top:calc(var(--tt) + 70px); }
+      body #hud .bottom-right { top:calc(var(--tt) + 200px); }
+      body #hud #message { top:calc(var(--tt) + 128px);bottom:auto; }
+      body.in-vehicle #hud #message { top:calc(var(--tt) + 116px); }
+      body.in-vehicle #hud .bottom-left { bottom:calc(var(--tb) + 146px); }
+    }
   </style>
 <link rel="stylesheet" href="/weapon-cards.css">
 </head>
@@ -1006,7 +1050,7 @@
       <div class="menu-panel">
         <h2>How to play</h2>
         <p class="sub">30-second briefing. Then deploy on <b style="color:var(--cyan)">Recruit</b> if you’re new.</p>
-        <div class="mobile-only" style="padding:12px;border:1px solid var(--line);font-size:12px;line-height:1.6;margin-bottom:16px"><b>Move, look, fire.</b><br>Left thumb moves; drag the right side to look. FIRE shoots, RLD reloads, JET jumps.<br>MORE opens weapon, aim, sprint, melee and screen controls. Enter appears beside a vehicle. Live radio is vehicle-only; it needs an approved station. Rotating your phone does not restart the mission.</div>
+        <div class="mobile-only" style="padding:12px;border:1px solid var(--line);font-size:12px;line-height:1.6;margin-bottom:16px"><b>Move, look, fire.</b><br>Left thumb moves; push the stick all the way forward to run. Drag the right side to look. FIRE shoots, CROUCH crouches (slides while running), RLD reloads, JET jumps, AIM aims. Tap the gun name to switch weapons.<br>MORE has melee, night vision and screen controls. The steering-wheel icon appears beside a vehicle. Live radio starts when you drive. Rotating your phone does not restart the mission.</div>
         <div class="how-grid">
           <div class="how-row"><kbd>WASD</kbd><span>Move. <b>Q</b> sprint. Mouse looks (click the view first).</span></div>
           <div class="how-row"><kbd>LMB / R2</kbd><span>Fire. <b>Shift</b> also fires (not sprint). <b>RMB / L2</b> aim down sights.</span></div>
@@ -1323,7 +1367,7 @@
   </section>
 
   <div id="touchControls" class="hidden">
-    <div id="joystickZone"><div id="joystickBase"></div><div id="joystickKnob"></div></div>
+    <div id="joystickZone"><div id="sprintCue" aria-hidden="true">RUN</div><div id="joystickBase"></div><div id="joystickKnob"></div></div>
     <div id="lookZone"></div>
     <button id="fireButton" class="touch-btn" aria-label="Fire weapon">FIRE</button>
     <button id="reloadButton" class="touch-btn" aria-label="Reload weapon">RLD</button>
@@ -1331,10 +1375,7 @@
     <button id="jetButton" class="touch-btn" aria-label="Hold to jump and fly">JET</button>
     <button id="pauseButton" class="touch-btn" aria-label="Pause game">Ⅱ</button>
     <button id="touchMoreButton" class="touch-btn" aria-label="More gameplay actions" aria-controls="touchExtras" aria-expanded="false">MORE</button>
-    <div id="movementActions" aria-label="Movement actions">
-      <button id="sprintButton" class="touch-btn" aria-label="Toggle run" aria-pressed="false">RUN</button>
-      <button id="crouchButton" class="touch-btn" aria-label="Toggle crouch; press while running to slide" aria-pressed="false">CROUCH</button>
-    </div>
+    <button id="crouchButton" class="touch-btn" aria-label="Toggle crouch; press while running to slide" aria-pressed="false">CROUCH</button>
     <div id="touchExtras" hidden>
     <button id="nightVisionButton" class="touch-btn" aria-label="Toggle night vision" aria-pressed="false">NVG OFF</button>
     <button id="weaponButton" class="touch-btn" aria-label="Switch to next unlocked weapon">GUN</button>
@@ -1344,7 +1385,7 @@
     </div>
   </div>
 
-  <dialog id="multiplayerPanel" aria-label="Multiplayer" style="position:fixed;inset:0;width:100%;height:100%;max-width:none;max-height:none;padding:0;border:0;background:#081519;color:white">
+  <dialog id="multiplayerPanel" aria-label="Multiplayer" style="position:fixed;inset:0;width:100%;height:100%;max-width:none;max-height:none;box-sizing:border-box;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);border:0;background:#081519;color:white">
     <iframe id="multiplayerFrame" title="NEON BREACH multiplayer" allow="fullscreen; gamepad" style="display:block;width:100%;height:100%;border:0"></iframe>
   </dialog>
   <script type="module">
