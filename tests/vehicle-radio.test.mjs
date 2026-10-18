@@ -50,6 +50,17 @@ test('late play completion cannot restart a stream after exiting a vehicle',asyn
   const radio=new VehicleRadio({stations:[station],createMedia:()=>media});const pending=radio.start(options);radio.stop();resolve();await pending;
   assert.equal(radio.status().state,'stopped');assert.equal(media.paused,true);assert.equal(media.src,'');
 });
+test('gesture priming reuses the same element for stations and stops, without remote requests',async()=>{
+  const {radio,media}=fixture();radio.prime();await Promise.resolve();
+  assert.equal(radio.status().primed,true);assert.equal(media.length,1);assert.equal(media[0].src,'');assert.equal(media[0].paused,true);
+  await radio.start(options);media[0].emit('playing');assert.equal(radio.state,'playing');radio.stop();
+  await radio.start(options);assert.equal(media.length,1);media[0].emit('playing');assert.equal(radio.state,'playing');radio.stop();
+});
+test('late priming completion cannot clear an active station, and repeated starts remove old listeners',async()=>{
+  const {radio,media}=fixture();let resolve;radio.createMedia=()=>{const m=new Media();m.play=()=>new Promise(done=>{resolve=done;});media.push(m);return m;};
+  radio.prime();const finishPrime=resolve;await radio.start(options);finishPrime();await Promise.resolve();assert.equal(media[0].src,station.url);
+  media[0].emit('playing');assert.equal(radio.state,'playing');radio.stop();media[0].emit('error');assert.equal(radio.state,'stopped');
+});
 test('game and offline build use vehicle live radio instead of synthesized stations',async()=>{
   const game=await readFile('public/game.js','utf8'),build=await readFile('scripts/build.mjs','utf8'),sw=await readFile('public/sw.js','utf8');
   assert.doesNotMatch(game,/audio\?\.startRadio\(/);assert.match(game,/inVehicle:player\.carIndex>=0/);

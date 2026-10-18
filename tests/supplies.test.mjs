@@ -32,6 +32,6 @@ test('mission directions explain the required action, not just phase names',()=>
   assert.match(missionInstruction({type:'defend'},1,15),/15s remaining/);
   assert.match(missionInstruction({type:'destroy'},2,0,3),/Shoot.*3 remaining/);
   assert.match(missionInstruction({type:'hvt'},2),/defeat the commander/);
-  assert.match(missionInstruction({type:'extract'},2),/E \/ Triangle to enter/);
+  assert.match(missionInstruction({type:'extract'},2),/E \/ hold Square/);
   assert.match(missionInstruction({type:'extract'},2,0,0,true),/Drive.*finish the mission/);
 });

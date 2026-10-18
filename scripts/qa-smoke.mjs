@@ -185,10 +185,17 @@ try {
   check('keyboard E exits taxi',await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===-1));
   check('controller taxi can be approached',await page.evaluate(()=>window.__NEON_QA__.besideVehicle(0)));
   await page.evaluate(()=>{const make=index=>({index,connected:true,mapping:'standard',id:index?'DualSense Wireless Controller':'Idle controller',axes:[0,0,0,0],buttons:Array.from({length:17},()=>({pressed:false,value:0}))});window.__qaPads=[make(0),make(1)];Object.defineProperty(navigator,'getGamepads',{configurable:true,value:()=>window.__qaPads});});
-  await page.evaluate(()=>window.__qaPads[1].buttons[3]={pressed:true,value:1});await waitForState(page,()=>window.__NEON_QA__.snapshot().carIndex===0);
-  await new Promise(resolve=>setTimeout(resolve,250));check('Triangle enters once while held with an idle first controller',await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===0));
-  await page.evaluate(()=>window.__qaPads[1].buttons[3]={pressed:false,value:0});await new Promise(resolve=>setTimeout(resolve,200));await page.evaluate(()=>window.__qaPads[1].buttons[3]={pressed:true,value:1});await waitForState(page,()=>window.__NEON_QA__.snapshot().carIndex===-1);check('Triangle exits on the next press',true);
-  await page.evaluate(()=>{window.__qaPads[1].buttons[3]={pressed:false,value:0};window.__qaPads[1].buttons[9]={pressed:true,value:1};});await waitForState(page,()=>window.__NEON_QA__.snapshot().mode==='paused');check('campaign Options pauses the mission',true);await page.evaluate(()=>window.__qaPads[1].buttons[9]={pressed:false,value:0});await new Promise(resolve=>setTimeout(resolve,200));await page.evaluate(()=>window.__qaPads[1].buttons[9]={pressed:true,value:1});await waitForState(page,()=>window.__NEON_QA__.snapshot().mode==='playing');check('campaign Options resumes the mission',true);await page.evaluate(()=>{delete navigator.getGamepads;delete window.__qaPads;});
+  // COD layout: tap Square beside a vehicle does not enter; holding it does (once); Circle gets out.
+  await page.evaluate(()=>window.__qaPads[1].buttons[2]={pressed:true,value:1});await new Promise(resolve=>setTimeout(resolve,120));await page.evaluate(()=>window.__qaPads[1].buttons[2]={pressed:false,value:0});await new Promise(resolve=>setTimeout(resolve,250));
+  check('tapping Square beside a vehicle does not enter it',await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===-1));
+  await page.evaluate(()=>window.__qaPads[1].buttons[2]={pressed:true,value:1});await waitForState(page,()=>window.__NEON_QA__.snapshot().carIndex===0);
+  await new Promise(resolve=>setTimeout(resolve,400));check('holding Square enters once with an idle first controller',await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===0));
+  check('driving shows the exit icon with the Circle hint',await page.evaluate(()=>{const b=document.getElementById('vehicleButton');return b.dataset.kind==='exit'&&!!b.querySelector('svg')&&b.querySelector('.vehicle-key')?.textContent==='○';}));
+  await page.evaluate(()=>window.__qaPads[1].buttons[2]={pressed:false,value:0});await new Promise(resolve=>setTimeout(resolve,150));
+  await page.evaluate(()=>{const pad=window.__qaPads[1];pad.buttons[7]={pressed:true,value:1};});await new Promise(resolve=>setTimeout(resolve,500));
+  check('R2 accelerates the vehicle',await page.evaluate(()=>Math.abs(window.__NEON_3D__.frame().cars[0].speed)>.5));
+  await page.evaluate(()=>{window.__qaPads[1].buttons[7]={pressed:false,value:0};window.__qaPads[1].buttons[1]={pressed:true,value:1};});await waitForState(page,()=>window.__NEON_QA__.snapshot().carIndex===-1);check('Circle exits the vehicle',true);
+  await page.evaluate(()=>{window.__qaPads[1].buttons[1]={pressed:false,value:0};window.__qaPads[1].buttons[9]={pressed:true,value:1};});await waitForState(page,()=>window.__NEON_QA__.snapshot().mode==='paused');check('campaign Options pauses the mission',true);await page.evaluate(()=>window.__qaPads[1].buttons[9]={pressed:false,value:0});await new Promise(resolve=>setTimeout(resolve,200));await page.evaluate(()=>window.__qaPads[1].buttons[9]={pressed:true,value:1});await waitForState(page,()=>window.__NEON_QA__.snapshot().mode==='playing');check('campaign Options resumes the mission',true);await page.evaluate(()=>{delete navigator.getGamepads;delete window.__qaPads;});
   await waitForState(page,()=>Number(document.getElementById('radar').dataset.enemies)>0);check('tactical campaign map is visible and marks living enemies',await page.$eval('#radarWrap',el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(el).display!=='none';}));
   check('tricycle can be approached',await page.evaluate(()=>window.__NEON_QA__.besideVehicle(3)));
   await page.evaluate(()=>document.exitPointerLock());
@@ -212,6 +219,28 @@ try {
     await page.keyboard.press('e');
     check(`fleet vehicle ${index} exits`,await page.evaluate(()=>window.__NEON_QA__.snapshot().carIndex===-1));
   }
+  // Deterministic radio transport fixture: real HTMLAudioElement playback, no
+  // live broadcast dependency, no public directory requests or paid services.
+  const wav=Buffer.alloc(44+8000*2*30);wav.write('RIFF',0);wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(8000,24);wav.writeUInt32LE(16000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(wav.length-44,40);
+  await page.setRequestInterception(true);
+  const radioTransport=async request=>{const url=new URL(request.url());if(url.hostname.endsWith('.api.radio-browser.info'))await request.respond({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:JSON.stringify(['one','two'].map(id=>({stationuuid:id,name:`QA Abuja ${id}`,countrycode:'NG',state:'Abuja',lastcheckok:1,hls:0,codec:'MP3',url_resolved:`https://radio-fixture.example.test/${id}.wav`,homepage:'https://example.test/'})))});else if(url.hostname==='radio-fixture.example.test')await request.respond({status:200,contentType:'audio/wav',headers:{'access-control-allow-origin':'*'},body:wav});else await request.continue();};
+  page.on('request',radioTransport);
+  await page.evaluate(()=>window.__NEON_QA__.besideVehicle(0));await page.keyboard.press('e');
+  await page.evaluate(()=>{window.__radioPad={index:0,connected:true,mapping:'standard',id:'DualSense Wireless Controller',axes:[0,0,0,0],buttons:Array.from({length:17},()=>({pressed:false,value:0}))};Object.defineProperty(navigator,'getGamepads',{configurable:true,value:()=>[window.__radioPad]});});
+  const radioPad=async button=>{await page.evaluate(button=>window.__radioPad.buttons[button]={pressed:true,value:1},button);await new Promise(r=>setTimeout(r,150));await page.evaluate(button=>window.__radioPad.buttons[button]={pressed:false,value:0},button);await new Promise(r=>setTimeout(r,150));};
+  await radioPad(12);await waitForState(page,()=>window.__NEON_QA__.radioStatus().state==='playing');
+  check('pad up discovers and plays real media after initial gesture priming',await page.evaluate(()=>window.__NEON_QA__.radioStatus().primed));
+  const firstRadio=await page.evaluate(()=>window.__NEON_QA__.radioStatus().station);await radioPad(15);await waitForState(page,()=>window.__NEON_QA__.radioStatus().state==='playing');
+  check('pad right changes station',await page.evaluate(first=>window.__NEON_QA__.radioStatus().station!==first,firstRadio));await radioPad(14);await waitForState(page,()=>window.__NEON_QA__.radioStatus().state==='playing');
+  check('pad left returns to previous station',await page.evaluate(first=>window.__NEON_QA__.radioStatus().station===first,firstRadio));
+  const volumeBefore=await page.evaluate(()=>window.__NEON_QA__.radioStatus().volume);await radioPad(4);check('L1 lowers radio volume',await page.evaluate(v=>Math.abs(window.__NEON_QA__.radioStatus().volume-Math.max(0,v-.1))<.001,volumeBefore));await radioPad(5);check('R1 raises radio volume',await page.evaluate(v=>Math.abs(window.__NEON_QA__.radioStatus().volume-v)<.001,volumeBefore));
+  await radioPad(13);check('pad down turns radio off',await page.evaluate(()=>window.__NEON_QA__.radioStatus().station==='off'&&window.__NEON_QA__.radioStatus().state==='off'));
+  await page.evaluate(()=>{const play=HTMLMediaElement.prototype.play;window.__radioPlay=play;let reject=true;HTMLMediaElement.prototype.play=function(){if(reject&&this.src.includes('radio-fixture')){reject=false;return Promise.reject(new DOMException('QA autoplay block','NotAllowedError'));}return play.call(this);};});
+  await radioPad(12);await waitForState(page,()=>window.__NEON_QA__.radioStatus().state==='blocked');await radioPad(12);await waitForState(page,()=>window.__NEON_QA__.radioStatus().state==='playing');check('pad up recovers a blocked stream with one explicit retry',true);
+  check('radio controller mapping is visible',await page.$eval('#gameRadioContext',el=>el.textContent.includes('L1/R1')));
+  check('exit ring is amber',await page.$eval('#vehicleButton',el=>getComputedStyle(el).borderTopColor==='rgb(255, 187, 85)'));
+  await page.keyboard.press('e');check('exit stops controller-started radio',await page.evaluate(()=>window.__NEON_QA__.radioStatus().state==='stopped'));
+  await page.evaluate(()=>{HTMLMediaElement.prototype.play=window.__radioPlay;delete navigator.getGamepads;delete window.__radioPad;delete window.__radioPlay;});page.off('request',radioTransport);await page.setRequestInterception(false);
   check('outer district taxi can be approached',await page.evaluate(()=>window.__NEON_QA__.besideVehicle(5)));
   await page.keyboard.press('e');
   const driveStart=await page.evaluate(()=>window.__NEON_QA__.worldSnapshot().cars[5]);
@@ -262,7 +291,7 @@ try {
   const slide = await page.evaluate(() => window.__NEON_QA__.snapshot());
   await page.keyboard.up('KeyW'); await page.keyboard.up('KeyQ');
   check('crouching from a sprint starts a slide', slide.sliding && slide.crouch > .3, `speed=${slide.speed?.toFixed(2)} crouch=${slide.crouch?.toFixed(2)}`);
-  await new Promise(resolve => setTimeout(resolve, 900));
+  await waitForState(page,()=>!window.__NEON_QA__.snapshot().sliding,5000);
   const crouched = await page.evaluate(() => window.__NEON_QA__.snapshot());
   check('crouch persists after the slide ends', !crouched.sliding && crouched.crouch > .8, `crouch=${crouched.crouch?.toFixed(2)}`);
   await page.keyboard.press('KeyC');

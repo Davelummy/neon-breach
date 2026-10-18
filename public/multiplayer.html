@@ -17,7 +17,7 @@ body.playing.touch-mode #touch{display:block}body.playing:not(.touch-mode) #touc
   <button id="create" disabled>Create private room</button>
   <label>Friend’s room code<input id="code" maxlength="10" autocomplete="off" autocapitalize="characters" placeholder="10-character code"></label>
   <button id="join" disabled>Join room</button><p id="status" role="status">Checking your session…</p>
-  <details><summary>Controls</summary><p class="muted">WASD / arrows / left stick move; Q / L3 sprint. Mouse / drag / right stick look. Shift / click / R2 fire; R / Square reload. Hold Space / X for jet or vehicle boost. E / Triangle enters or exits a nearby vehicle. Options / Escape opens the match menu; other players keep playing.</p></details>
+  <details><summary>Controls</summary><p class="muted">WASD / arrows / left stick move; Q / L3 sprint. Mouse / drag / right stick look. Shift / click / R2 fire on foot; R / Square reload. Hold Space / X for jet or vehicle boost. E / hold Square enters a nearby vehicle; E / Circle exits. R2 accelerates and L2 brakes while driving. Options / Escape opens the match menu; other players keep playing.</p></details>
 </section></div>
 <div id="hud" hidden>
   <div id="top"><div><div id="roundInfo"></div><div id="matchObjective"></div><div id="feed" aria-live="polite"></div></div>
@@ -25,7 +25,7 @@ body.playing.touch-mode #touch{display:block}body.playing:not(.touch-mode) #touc
       <h2 class="panel-label">Scoreboard</h2><div id="scores"></div>
       <p id="liveMatchNotice">Your inputs are stopped. Live match continues.</p><button id="resumeMatch">Resume controls</button>
       <p id="inviteStatus" role="status"></p><label id="inviteFallback" hidden>Invite link<input id="inviteLink" readonly aria-label="Room invite link"></label>
-      <details id="controlHelp"><summary>Controls</summary><p>Move: WASD / arrows / left stick.<br>Sprint: Q / Sprint / L3.<br>Look: mouse / drag the world / right stick.<br>Fire: click / Shift / R2.<br>Aim: right-click / tap Aim / L2.<br>Reload: R / Reload / Square.<br>Jet / vehicle boost: hold Space / JET / X. Land to recharge on foot.<br>Vehicles: E / Enter / Triangle.<br>Options / Escape opens this menu. The match continues.</p></details>
+      <details id="controlHelp"><summary>Controls</summary><p>Move: WASD / arrows / left stick.<br>Sprint: Q / Sprint / L3.<br>Look: mouse / drag the world / right stick.<br>Fire on foot: click / Shift / R2.<br>Aim / vehicle brake: right-click / tap Aim / L2.<br>Reload: R / Reload / Square.<br>Jet / vehicle boost: hold Space / JET / X. Land to recharge on foot.<br>Enter vehicle: E / Enter / hold Square. Exit: E / Circle. R2 accelerates.<br>Options / Escape opens this menu. The match continues.</p></details>
       <button id="sound">Sound on</button><button id="controls">Touch controls</button><button id="leave">Leave room</button><button id="matchLogout" type="button">Log out</button>
     </details><figure id="matchMap" aria-label="Arena map: green arrow is you; red dots are enemies"><canvas id="matchRadar" width="128" height="128"></canvas><figcaption>You ▲ · Enemy ●</figcaption></figure></div>
   </div>

@@ -62,7 +62,7 @@ let accountCheckPending=true;
       bob: 0, bobAmount: 0, score: 0, kills: 0, combo: 1, comboTimer: 0,
       hurtTimer: 0, alive: true, shots: 0, hits: 0, grounded: true, jetFuel: 100, jetting: false, ads: 0, stepTimer: 0, jetSoundTimer: 0, heartTimer: 0,
       weaponIndex:0,weaponSlots:[],carIndex:-1,gamepadAimValue:0,moveVx:0,moveVy:0,strafe:0,
-      crouch:0,crouchToggle:false,wasCrouch:false,wasSliding:false,slideTimer:0,slideCooldown:0,wasJetting:false,jetIgnite:0,jetFov:0
+      crouch:0,crouchToggle:false,wasCrouch:false,wasSliding:false,slideTimer:0,slideCooldown:0,wasJetting:false,jetIgnite:0,jetFov:0,jetEmpty:false
     };
     const renderCamera = { x: 0, y: 0, z: 0, dir: 0, pitch: 0, roll: 0 };
     const threeFrame = {};
@@ -402,7 +402,7 @@ let accountCheckPending=true;
     }
 
     function resetPlayer() {
-      Object.assign(player,{x:11.5,y:18.5,z:GROUND_HEIGHT,vz:0,dir:-Math.PI/2,pitch:0,health:100,shield:50,armor:100,shieldDelay:0,ammo:30,reserve:120,fireCooldown:0,reloading:false,reloadTimer:0,spread:0,recoil:0,recoilKick:0,recoilYaw:0,swayX:0,swayY:0,breath:0,sprintLock:0,lookVx:0,lookVy:0,bob:0,bobAmount:0,score:0,kills:0,combo:1,comboTimer:0,hurtTimer:0,alive:true,shots:0,hits:0,grounded:true,jetFuel:100,jetting:false,ads:0,stepTimer:0,jetSoundTimer:0,heartTimer:0,weaponIndex:0,weaponSlots:WEAPONS.map(cfg=>({ammo:cfg.mag,reserve:cfg.reserve})),carIndex:-1,gamepadAimValue:0,moveVx:0,moveVy:0,strafe:0,crouch:0,crouchToggle:false,wasCrouch:false,wasSliding:false,slideTimer:0,slideCooldown:0,wasJetting:false,jetIgnite:0,jetFov:0});
+      Object.assign(player,{x:11.5,y:18.5,z:GROUND_HEIGHT,vz:0,dir:-Math.PI/2,pitch:0,health:100,shield:50,armor:100,shieldDelay:0,ammo:30,reserve:120,fireCooldown:0,reloading:false,reloadTimer:0,spread:0,recoil:0,recoilKick:0,recoilYaw:0,swayX:0,swayY:0,breath:0,sprintLock:0,lookVx:0,lookVy:0,bob:0,bobAmount:0,score:0,kills:0,combo:1,comboTimer:0,hurtTimer:0,alive:true,shots:0,hits:0,grounded:true,jetFuel:100,jetting:false,ads:0,stepTimer:0,jetSoundTimer:0,heartTimer:0,weaponIndex:0,weaponSlots:WEAPONS.map(cfg=>({ammo:cfg.mag,reserve:cfg.reserve})),carIndex:-1,gamepadAimValue:0,moveVx:0,moveVy:0,strafe:0,crouch:0,crouchToggle:false,wasCrouch:false,wasSliding:false,slideTimer:0,slideCooldown:0,wasJetting:false,jetIgnite:0,jetFov:0,jetEmpty:false});
       equipWeapon(0,true);
     }
 
@@ -1027,7 +1027,7 @@ let accountCheckPending=true;
       if(!car)return;
         const target=state.objectiveTarget||[11.5,6.5];
       car.x=target[0]+1.2;car.y=target[1];car.dir=Math.PI/2;car.hp=car.maxHp;car.destroyed=false;
-      showComms('ARES COMMAND','Interceptor staged for this phase. Board with E / △ — armor denser on the ground.',4.5);
+      showComms('ARES COMMAND','Interceptor staged for this phase. Board with E or hold □ — armor denser on the ground.',4.5);
       showMessage('ARES INTERCEPTOR STAGED // VEHICLE PHASE');
     }
 
@@ -1043,6 +1043,11 @@ let accountCheckPending=true;
     }
     let storedRadioStations=[];try{storedRadioStations=cachedStations(localStorage);}catch{}
     const liveRadio=new VehicleRadio({stations:storedRadioStations,onChange:()=>updateRadioLabel()});
+    // Retain the same HTMLAudioElement across stations/vehicles. Browser media
+    // permission is per element (not inherited from the game's AudioContext).
+    const primeRadio=event=>{if(!event.isTrusted)return;if(liveRadio.state==='blocked'&&player.carIndex>=0&&state.mode==='playing')startGameplayRadio();else liveRadio.prime();};
+    addEventListener('pointerdown',primeRadio,{capture:true});
+    addEventListener('keydown',primeRadio,{capture:true});
     let radioStations=['off',...liveRadio.stations.map(station=>station.id)];
     let radioNames=Object.fromEntries([['off','Radio off'],...liveRadio.stations.map(station=>[station.id,station.name])]);
     let radioDiscovering=false;
@@ -1063,9 +1068,9 @@ let accountCheckPending=true;
     function updateRadioLabel(){
       const car=state.cars?.[player.carIndex],visible=!!car&&state.mode==='playing',status=liveRadio.status();
       $('gameRadio').hidden=!visible;document.body.classList.toggle('in-vehicle',!!car);
-      $('gameRadioContext').textContent=coarsePointer?'LIVE VEHICLE RADIO':'LIVE RADIO · N: TUNE / NEXT';
+      $('gameRadioContext').textContent=activeGamepad?'RADIO · ↑ PLAY · ← → STATION · ↓ OFF · L1/R1 VOLUME':coarsePointer?'LIVE VEHICLE RADIO':'LIVE RADIO · N: TUNE / NEXT';
       $('jetButton').textContent=car?'BOOST':'JET';$('jetButton').setAttribute('aria-label',car?'Hold for vehicle boost':'Hold to jump and fly');
-      const labels={unconfigured:'Tune Nigerian radio',connecting:'Connecting…',buffering:'Buffering…',blocked:'Tap play to listen',unavailable:'Stream unavailable'};
+      const labels={unconfigured:'Tune Nigerian radio',connecting:'Connecting…',buffering:'Buffering…',blocked:activeGamepad?'Press Enter once to enable audio · ↑ retry':'Press play to enable audio',unavailable:'Stream unavailable'};
       $('gameRadioStation').textContent=radioDiscovering?'Finding stations…':state.muted?'Sound muted':radioVolume===0?'Radio volume 0':labels[status.state]||radioNames[radioStation]||'Tune Nigerian radio';
       const credit=$('radioCredit'),station=liveRadio.stations.find(s=>s.id===radioStation);credit.hidden=!station?.homepage;credit.href=station?.homepage||'https://www.radio-browser.info/';credit.textContent=station?'Station website':'Station website';
       if($('radioStation'))$('radioStation').value=radioStation;
@@ -1075,6 +1080,7 @@ let accountCheckPending=true;
       $('gameRadio').setAttribute('aria-label',car?`${car.name} live radio controls`:'Vehicle live radio controls');
     }
     function selectRadioStation(station){if(!radioStations.includes(station))return;radioStation=station;try{localStorage.setItem('neon-breach-live-radio',station);}catch{}startGameplayRadio();}
+    function changeRadioVolume(delta){radioVolume=Math.round(Math.max(0,Math.min(1,radioVolume+delta))*100)/100;try{localStorage.setItem('neon-breach-radio-volume',String(radioVolume));}catch{}$('radioVolume').value=String(radioVolume*100);liveRadio.setVolume(radioVolume*(state.masterVolume??.28),state.muted);updateRadioLabel();showMessage(`RADIO VOLUME ${Math.round(radioVolume*100)}%`);}
     function cycleRadioStation(direction){if(player.carIndex<0||state.mode!=='playing')return;if(!liveRadio.stations.length){void tuneLiveRadio();return;}selectRadioStation(radioStations[(radioStations.indexOf(radioStation)+direction+radioStations.length)%radioStations.length]);}
     async function switchScreenMode(){
       if(document.fullscreenElement){try{screen.orientation?.unlock?.();await document.exitFullscreen();}catch{}return;}
@@ -1359,7 +1365,7 @@ let accountCheckPending=true;
         if(!exit){showMessage('EXIT BLOCKED · MOVE THE VEHICLE INTO OPEN SPACE');return;}player.x=exit.x;player.y=exit.y;player.z=GROUND_HEIGHT;player.carIndex=-1;car.occupied=false;car.speed=0;startGameplayRadio();audio?.vehicle();showMessage(`EXITED ${car.name}`);rumble(.12,.18,60);return;
       }
       const nearest=nearbyVehicle();
-      if(nearest<0){showMessage('MOVE BESIDE A VEHICLE · E / TRIANGLE / ENTER BUTTON');return;}const car=state.cars[nearest];car.occupied=true;player.carIndex=nearest;player.x=car.x;player.y=car.y;player.z=.62;player.vz=0;player.grounded=true;player.dir=car.dir;startGameplayRadio();$('touchExtras').hidden=true;$('touchMoreButton').setAttribute('aria-expanded','false');audio?.vehicle();showMessage(`${car.name} · E / TRIANGLE EXIT`);rumble(.16,.25,90);
+      if(nearest<0){showMessage('MOVE BESIDE A VEHICLE · E / HOLD □ / DRIVE BUTTON');return;}const car=state.cars[nearest];car.occupied=true;player.carIndex=nearest;player.x=car.x;player.y=car.y;player.z=.62;player.vz=0;player.grounded=true;player.dir=car.dir;startGameplayRadio();$('touchExtras').hidden=true;$('touchMoreButton').setAttribute('aria-expanded','false');audio?.vehicle();showMessage(`${car.name} · E / ○ EXIT`);rumble(.16,.25,90);
     }
     function nearbyVehicle(){let nearest=-1,best=1.6;if(Math.abs(player.z-GROUND_HEIGHT)>.85)return -1;for(let i=0;i<state.cars.length;i++){const car=state.cars[i],distance=vehicleDistance(car,player.x,player.y);if(car.destroyed||car.occupied||distance>=best)continue;if(!lineOfSight(player.x,player.y,car.x,car.y,player.z))continue;const mx=(player.x+car.x)/2,my=(player.y+car.y)/2;if(coverAt(mx,my))continue;best=distance;nearest=i;}return nearest;}
 
@@ -1382,6 +1388,7 @@ let accountCheckPending=true;
       const actuator=activeGamepad?.vibrationActuator;if(!actuator?.playEffect)return;
       try{actuator.playEffect('dual-rumble',{duration,strongMagnitude:strong,weakMagnitude:weak});}catch{}
     }
+    const SQUARE_HOLD=.3;let squareHold=0,squareUsed=false;
     function updateGamepad(dt){
       const pads=navigator.getGamepads?.()||[],pad=selectConnectedGamepad(pads,activeGamepad?.index),status=$('controllerStatus');if(pad?.index!==activeGamepad?.index)gamepadPrevious=[];activeGamepad=pad;
       status?.classList.toggle('connected',!!pad);if(status)status.textContent=pad?`${/dualsense|wireless controller/i.test(pad.id)?'DUALSENSE':'GAMEPAD'} // ONLINE`:'DUALSENSE // SCANNING';
@@ -1389,18 +1396,48 @@ let accountCheckPending=true;
       const down=pad.buttons.map(button=>button.pressed||button.value>.5),pressed=index=>down[index]&&!gamepadPrevious[index];
       // Options: pause / resume only — never skip the menu into a deploy.
       if(pressed(9)){if($('weaponPreviewDialog')?.open)$('weaponPreviewDialog').close();else if(state.mode==='playing')pauseGame();else if(state.mode==='paused')resumeGame();}
-      if(pressed(4)&&state.mode==='playing')toggleAutoLock();if(pressed(8)&&state.mode==='playing')toggleNightVision();
+      if(pressed(4)&&state.mode==='playing'&&player.carIndex<0)toggleAutoLock();if(pressed(8)&&state.mode==='playing')toggleNightVision();
       if(state.mode!=='playing'){
         controllerAxis={x:0,y:0};input.gamepadFire=input.gamepadAim=input.gamepadJump=input.gamepadSprint=false;input.gamepadAimValue=0;
         updateMenuGamepad(pad,down,pressed,dt);
         gamepadPrevious=down;return;
       }
-      controllerAxis={x:deadzone(pad.axes[0]||0),y:deadzone(pad.axes[1]||0)+(down[13]?1:0)-(down[12]?1:0)};
+      // COD-style layout. On foot: D-pad up/down also moves. Driving: left stick steers and drives, R2 is the
+      // throttle, L2 brakes, X boosts, and the D-pad belongs to the radio.
+      const inCar=player.carIndex>=0;
+      controllerAxis=inCar?{x:deadzone(pad.axes[0]||0),y:Math.max(-1,deadzone(pad.axes[1]||0)-(pad.buttons[7]?.value||0))}:{x:deadzone(pad.axes[0]||0),y:deadzone(pad.axes[1]||0)+(down[13]?1:0)-(down[12]?1:0)};
       const sens=lookScale(),lookX=deadzone(pad.axes[2]||0,.12)*sens,lookY=deadzone(pad.axes[3]||0,.12)*sens*pitchSign();turnLook(lookX*2.65*dt);player.pitch=Math.max(-canvas.height*.2,Math.min(canvas.height*.2,player.pitch-lookY*canvas.height*.75*dt));
-      input.gamepadFire=!!down[7];input.gamepadAimValue=pad.buttons[6]?.value||0;input.gamepadAim=input.gamepadAimValue>.08;input.gamepadJump=!!down[0];input.gamepadSprint=!!down[10];
-      if(pressed(0)&&player.carIndex<0)startJump();if(pressed(1)&&player.carIndex<0)toggleCrouch();if(pressed(2))reload();if(pressed(3)||(pressed(1)&&player.carIndex>=0))toggleVehicle();if(pressed(11))meleeTakedown();if(pressed(5)&&player.carIndex<0)cycleWeapon(1);if(pressed(14))cycleWeapon(-1);if(pressed(15))cycleWeapon(1);gamepadPrevious=down;
+      input.gamepadFire=!inCar&&!!down[7];input.gamepadAimValue=pad.buttons[6]?.value||0;input.gamepadAim=input.gamepadAimValue>.08;input.gamepadJump=!!down[0];input.gamepadSprint=!!down[10];
+      // Square (COD): away from vehicles it reloads at once; beside a vehicle or the armory, tap reloads and a short
+      // hold enters/uses. Circle: exit while driving, crouch on foot.
+      if(pressed(0)&&!inCar)startJump();
+      if(pressed(1)){if(inCar)toggleVehicle();else toggleCrouch();}
+      if(!inCar){
+        const usable=nearbyVehicle()>=0||nearGunShop();
+        if(pressed(2)){squareHold=0;squareUsed=!usable;if(!usable)reload();}
+        else if(down[2]&&usable&&!squareUsed){squareHold+=dt;if(squareHold>=SQUARE_HOLD){squareUsed=true;toggleVehicle();}}
+        else if(!down[2]&&gamepadPrevious[2]&&usable&&!squareUsed)reload();
+      }
+      if(pressed(3)&&!inCar)cycleWeapon(1);
+      if(pressed(11))meleeTakedown();if(pressed(5)&&!inCar)cycleWeapon(1);
+      if(inCar){if(pressed(14))cycleRadioStation(-1);if(pressed(15))cycleRadioStation(1);if(pressed(12))void tuneLiveRadio();if(pressed(13)&&radioStations.includes('off'))selectRadioStation('off');if(pressed(4))changeRadioVolume(-.1);if(pressed(5))changeRadioVolume(.1);}
+      else{if(pressed(14))cycleWeapon(-1);if(pressed(15))cycleWeapon(1);}
+      gamepadPrevious=down;
     }
 
+    // Icon-first interaction button: what you can do (drive / exit / shop) plus the key that does it.
+    const VEHICLE_ICONS={
+      drive:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/><path d="M3.6 10.6h6.1M14.3 10.6h6.1M12 14.4v6.2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+      exit:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 4H6v16h7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M11 12h9m-3.5-3.5L20 12l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      shop:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14l-1.2 12H6.2z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>',
+      wreck:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M8 8l8 8M16 8l-8 8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>'
+    };
+    let vehicleButtonKey='';
+    function renderVehicleButton(kind,label,key){
+      const button=$('vehicleButton'),next=`${kind}|${label}|${key}`;if(vehicleButtonKey===next)return;vehicleButtonKey=next;
+      button.dataset.kind=kind;button.setAttribute('aria-label',label);button.title=label;
+      button.innerHTML=`${VEHICLE_ICONS[kind]||''}${key?`<span class="vehicle-key">${key}</span>`:''}`;
+    }
     let hudRefreshTimer=0,cityTimer=0,cityElapsed=0;
     function update(dt,uiDt=dt){
       if(state.mode!=='playing')return;
@@ -1506,11 +1543,12 @@ let accountCheckPending=true;
         const jetBlocked=!!state.daily?.rules?.noJet;
         // No hard altitude cut-off: thrust eases toward a hover near the ceiling (on/off switching juddered).
         const JET_CEILING=3.8,jetHeadroom=Math.max(-.35,Math.min(1,(JET_CEILING-player.z)/1.3));
-        player.jetting=!jetBlocked&&(input.jump||input.gamepadJump)&&!player.grounded&&player.jetFuel>0;
+        // Flameout: an emptied pack stays off until you land, so you drop instead of stuttering on regen trickle.
+        player.jetting=!jetBlocked&&!player.jetEmpty&&(input.jump||input.gamepadJump)&&!player.grounded&&player.jetFuel>0;
         if(player.jetting&&!player.wasJetting){player.jetIgnite=.35;for(let n=0;n<12;n++){const a=n/12*Math.PI*2;pushParticle({x:player.x+Math.cos(a)*.12,y:player.y+Math.sin(a)*.12,z:player.z-.05,vx:Math.cos(a)*1.9,vy:Math.sin(a)*1.9,vz:-.2,gravity:.5,life:.32,max:.32,size:1.8,color:n%2?'#9ff7ff':'#e8fdff'});}}
         player.wasJetting=player.jetting;player.jetIgnite=Math.max(0,(player.jetIgnite||0)-dt);player.jetFov=(player.jetFov||0)+((player.jetting?.055:0)-(player.jetFov||0))*Math.min(1,dt*5);
         audio?.jetThrust?.(player.jetting,Math.min(1,.45+player.jetFuel/180+Math.max(0,player.vz)/8));
-        if(player.jetting){const climbTarget=3.25*jetHeadroom;player.vz+=(climbTarget-player.vz)*Math.min(1,dt*(player.vz<climbTarget?5.5:9));player.jetFuel=Math.max(0,player.jetFuel-29*dt*(.55+.45*Math.max(0,jetHeadroom)));player.jetSoundTimer-=dt;
+        if(player.jetting){const climbTarget=3.25*jetHeadroom;player.vz+=(climbTarget-player.vz)*Math.min(1,dt*(player.vz<climbTarget?5.5:9));player.jetFuel=Math.max(0,player.jetFuel-29*dt*(.55+.45*Math.max(0,jetHeadroom)));if(player.jetFuel<=0&&!player.jetEmpty){player.jetEmpty=true;showMessage('JET FUEL EMPTY');}player.jetSoundTimer-=dt;
           // Twin exhaust plumes under the pack; read from first person when looking down and in third person.
           if(player.jetSoundTimer<=0){player.jetSoundTimer=.035;const back=player.dir+Math.PI;for(const side of [-1,1]){const ox=Math.cos(back)*.14+Math.cos(player.dir+Math.PI/2)*side*.09,oy=Math.sin(back)*.14+Math.sin(player.dir+Math.PI/2)*side*.09;pushParticle({x:player.x+ox,y:player.y+oy,z:player.z-.02,vx:ox*1.5+(Math.random()-.5)*.3,vy:oy*1.5+(Math.random()-.5)*.3,vz:-2.6-Math.random()*1.2,gravity:-.6,life:.22+Math.random()*.1,max:.3,size:2.2+Math.random(),color:Math.random()<.35?'#ffffff':Math.random()<.5?'#9ff7ff':'#31f5db'});}}
           if(player.jetIgnite>0)state.screenShake=Math.max(state.screenShake,.12);}
@@ -1525,7 +1563,7 @@ let accountCheckPending=true;
             player.spread=Math.min(.16,player.spread+.04+impact*.02);
             player.recoilKick=Math.min(1.1,player.recoilKick+impact*.06);
           }
-          player.z=floorZ;player.vz=0;player.grounded=true;
+          player.z=floorZ;player.vz=0;player.grounded=true;player.jetEmpty=false;
         }else player.grounded=false;
       }
 
@@ -2117,15 +2155,17 @@ let accountCheckPending=true;
       const spread=(38+player.spread*170)*tacticalShotSpread(1,Math.hypot(player.moveVx,player.moveVy),player.grounded,player.sprintLock>0)*(1-player.ads*.65);$('crosshair').style.width=`${spread}px`;$('crosshair').style.height=`${spread}px`;$('crosshair').style.opacity=car?'0':String(1-player.ads*.82);
       $('scopeOverlay').style.opacity=car?'0':String(Math.max(0,(player.ads-.38)*1.62));$('zoomReadout').textContent=`${(1/(1-player.ads*cfg.zoom)).toFixed(1)}X ${cfg.short} SMART OPTIC`;
       const assisted=!car&&state.autoLock&&state.lockTarget&&!state.lockTarget.dead,lock=assisted?{enemy:state.lockTarget,dist:Math.hypot(state.lockTarget.x-player.x,state.lockTarget.y-player.y)}:(!car&&player.ads>.35?getAimTarget(.065):null),targetText=lock?`${assisted?'AUTO LOCK // ':''}${lock.enemy.commander?'COMMANDER VOSS':`${lock.enemy.elite?'ELITE ':''}${ENEMY_TYPES[lock.enemy.type].name}`} // ${lock.dist.toFixed(1)}M // ${String(lock.enemy.combatState||'engage').toUpperCase()}`:'NO TARGET LOCK';$('targetReadout').textContent=targetText;$('targetReadout').style.opacity=String(!car&&lock&&(assisted||player.ads>.48) ? .94 : 0);$('targetReadout').style.color=lock?(lock.enemy.elite?'#fff0a6':'var(--cyan)'):'var(--muted)';$('crosshair').classList.toggle('locked',!!assisted);$('lockModeBadge').classList.toggle('active',state.autoLock);$('lockModeBadge').textContent=`AUTO LOCK // ${state.autoLock?'ON':'OFF'} · L1 / T`;$('lockModeBadge').style.opacity=car?'0':'1';
-      const nearCar=player.carIndex<0&&state.cars.some(vehicle=>!vehicle.destroyed&&Math.hypot(vehicle.x-player.x,vehicle.y-player.y)<1.5),nearEnemy=player.carIndex<0&&state.enemies.some(enemy=>!enemy.dead&&Math.hypot(enemy.x-player.x,enemy.y-player.y)<1.58),context=car?`CHASE CAMERA // ${Math.ceil(car.hp)}% HULL // ${Math.ceil(car.boost)}% BOOST // △ EXIT`:nearEnemy?'R3 // CINEMATIC FINISHER':nearCar?'△ // ENTER ARES INTERCEPTOR':'';$('vehicleHud').textContent=context;$('vehicleHud').style.opacity=context?'1':'0';
+      const nearCar=player.carIndex<0&&state.cars.some(vehicle=>!vehicle.destroyed&&Math.hypot(vehicle.x-player.x,vehicle.y-player.y)<1.5),nearEnemy=player.carIndex<0&&state.enemies.some(enemy=>!enemy.dead&&Math.hypot(enemy.x-player.x,enemy.y-player.y)<1.58),context=car?`CHASE CAMERA // ${Math.ceil(car.hp)}% HULL // ${Math.ceil(car.boost)}% BOOST // ○ EXIT`:nearEnemy?'R3 // CINEMATIC FINISHER':nearCar?'HOLD □ // DRIVE':'';$('vehicleHud').textContent=context;$('vehicleHud').style.opacity=context?'1':'0';
       $('reloadTrack').style.opacity=player.reloading?'1':'0';$('reloadFill').style.width=player.reloading?`${(1-player.reloadTimer/player.reloadTime)*100}%`:'0%';
       const vehicleIndex=car?player.carIndex:nearbyVehicle(),vehicleButton=$('vehicleButton');
       const nearbyWreck=vehicleIndex<0&&player.carIndex<0&&state.cars.some(vehicle=>vehicle.destroyed&&vehicleDistance(vehicle,player.x,player.y)<1.6);
       vehicleButton.hidden=(vehicleIndex<0&&!nearbyWreck&&!nearGunShop())||state.mode!=='playing';vehicleButton.disabled=!!nearbyWreck&&!nearGunShop();
-      if(nearbyWreck)vehicleButton.textContent='Destroyed · find another taxi';
-      if(vehicleIndex>=0){const name=state.cars[vehicleIndex].name,buttonHint=activeGamepad?(/dualsense|wireless controller|054c/i.test(activeGamepad.id)?'△ · ':'Y · '):'';vehicleButton.textContent=`${buttonHint}${car?'Exit':'Enter'} ${name}`;$('vehicleHud').textContent=car?'WASD / LEFT STICK DRIVE · E / TRIANGLE EXIT':`E / TRIANGLE · ENTER ${name}`;$('vehicleHud').style.opacity='1';}
+      const ps=!!activeGamepad&&/dualsense|wireless controller|054c/i.test(activeGamepad.id);
+      if(nearbyWreck)renderVehicleButton('wreck','Destroyed · find another vehicle','');
+      if(vehicleIndex>=0){const name=state.cars[vehicleIndex].name;renderVehicleButton(car?'exit':'drive',`${car?'Exit':'Drive'} ${name}`,activeGamepad?(car?(ps?'○':'B'):(ps?'□':'X')):coarsePointer?'':'E');
+        $('vehicleHud').textContent=car?(activeGamepad?`LEFT STICK STEER · R2 GAS · L2 BRAKE · D-PAD RADIO · ${ps?'○':'B'} EXIT`:'WASD DRIVE · SPACE BOOST · N RADIO · E EXIT'):`${activeGamepad?`HOLD ${ps?'□':'X'}`:'E'} · DRIVE ${name}`;$('vehicleHud').style.opacity='1';}
       $('ammo').style.color=player.ammo<Math.max(2,cfg.mag*.23)?'var(--danger)':'var(--ink)';
-      if(nearGunShop()&&vehicleIndex<0)vehicleButton.textContent='Shop · E / Triangle';
+      if(nearGunShop()&&vehicleIndex<0)renderVehicleButton('shop','Open the district armory',activeGamepad?(ps?'□':'X'):coarsePointer?'':'E');
       $('adsButton')?.classList.toggle('active',input.aim);$('jetButton')?.classList.toggle('active',player.jetting);
       $('adsButton').textContent=car?'BRAKE':'AIM';$('adsButton').setAttribute('aria-label',car?'Toggle vehicle brake':'Toggle aim down sights');
     }

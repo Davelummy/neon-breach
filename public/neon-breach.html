@@ -534,7 +534,18 @@
     #supplyHint { position:absolute;left:50%;top:62%;transform:translateX(-50%);max-width:80vw;padding:8px 12px;background:rgba(4,10,15,.85);color:var(--amber);font-size:12px;text-align:center; }
     #loadoutWeapon,#radioStation { max-width:100%;padding:10px;background:#0b1920;color:var(--ink);border:1px solid var(--cyan); }
     #arenaSelect { width:100%;padding:10px;background:#0b1920;color:var(--ink);border:1px solid var(--cyan); }
-    #vehicleButton { position:absolute;right:18px;bottom:215px;pointer-events:auto;width:auto;max-width:220px;padding:12px;background:#15472e;border:1px solid #fff;color:#fff;font-size:12px;z-index:15; }
+    #vehicleButton { position:absolute;right:18px;bottom:215px;pointer-events:auto;z-index:15; }
+    /* Icon-first drive/exit/shop button (overrides the old text pill everywhere it is positioned). */
+    #hud #vehicleButton, #vehicleButton { width:64px!important;height:64px;max-width:none!important;padding:0;display:grid;place-items:center;border-radius:50%;background:rgba(4,12,18,.8);border:2px solid var(--cyan);color:#eefcff;box-shadow:0 0 0 4px rgba(49,245,219,.12),0 6px 18px rgba(0,0,0,.45);cursor:pointer;animation:drive-ready 1.6s ease-in-out infinite; }
+    #vehicleButton[hidden] { display:none; }
+    #vehicleButton svg { width:32px;height:32px; }
+    #hud #vehicleButton[data-kind="exit"] { border-color:var(--amber);animation:none; }
+    #hud #vehicleButton[data-kind="shop"] { border-color:#a66cff; }
+    #hud #vehicleButton[data-kind="wreck"], #hud #vehicleButton:disabled { border-color:#5b6b70;color:#8a9aa0;animation:none;cursor:default; }
+    #vehicleButton .vehicle-key { position:absolute;right:-6px;bottom:-6px;min-width:22px;height:22px;padding:0 5px;display:grid;place-items:center;border-radius:11px;background:#eefcff;color:#03100f;font:900 12px/1 ui-monospace,monospace;box-shadow:0 2px 6px rgba(0,0,0,.4); }
+    #vehicleButton:focus-visible { outline:3px solid #fff;outline-offset:3px; }
+    @keyframes drive-ready { 0%,100% { box-shadow:0 0 0 4px rgba(49,245,219,.12),0 6px 18px rgba(0,0,0,.45); } 50% { box-shadow:0 0 0 8px rgba(49,245,219,.22),0 6px 18px rgba(0,0,0,.45); } }
+    @media (prefers-reduced-motion:reduce) { #vehicleButton { animation:none; } }
     /* Flex + auto margins centre the taller card without clipping its top on short screens. */
     #accountGate { position:fixed;inset:0;z-index:65;display:flex;background:rgba(2,7,12,.97);overflow:auto;padding:20px; }    #accountGate .gate-card { width:min(440px,100%);margin:auto;padding:28px 24px;border:1px solid rgba(49,245,219,.28);background:linear-gradient(145deg,rgba(9,20,27,.96),rgba(4,10,15,.94));box-shadow:0 30px 80px rgba(0,0,0,.5),0 0 40px rgba(49,245,219,.08);clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px));animation:screen-in .4s ease both; }
     #accountGate .gate-eyebrow { justify-content:center;margin-bottom:16px; }
@@ -899,7 +910,7 @@
     <div id="takedownFlash"></div>
     <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i></div>
     <div id="vehicleHud">EXIT VEHICLE · E</div>
-    <button id="vehicleButton" hidden aria-label="Enter or exit the nearby vehicle">Enter vehicle</button>
+    <button id="vehicleButton" hidden aria-label="Drive the nearby vehicle"></button>
     <div id="supplyHint" hidden></div>
     <div id="hitMarker"></div>
     <div id="damageNumbers" aria-hidden="true"></div>
@@ -983,7 +994,7 @@
           <div class="how-row"><kbd>R / □</kbd><span>Reload. Empty mags auto-reload.</span></div>
           <div class="how-row"><kbd>1–6</kbd><span>Switch unlocked weapons. Walk over medkits and ammo to collect; gun caches equip the gun shown.</span></div>
           <div class="how-row"><kbd>F / R3</kbd><span>Finisher — close range, high score.</span></div>
-          <div class="how-row"><kbd>E / △</kbd><span>Enter / exit vehicles near extract.</span></div>
+          <div class="how-row"><kbd>E / hold □</kbd><span>Drive a nearby vehicle · E / ○ to get out.</span></div>
           <div class="how-row"><kbd>Esc</kbd><span>Pause. Options on DualSense.</span></div>
           <div class="how-row"><kbd>Pad</kbd><span>Menus: stick + Cross confirm, Circle back.</span></div>
         </div>

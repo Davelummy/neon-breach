@@ -128,7 +128,7 @@ export function missionInstruction(stage, distance, seconds=0, relays=0, inVehic
   if(stage.type==='defend')return distance<(stage.radius||2.25)?`Stay in the marked zone · ${Math.ceil(seconds)}s remaining`:'Move into the marked zone to start the upload';
   if(stage.type==='destroy')return `Shoot the marked relay · ${relays} remaining`;
   if(stage.type==='hvt')return 'Find and defeat the commander · watch for reinforcements';
-  if(stage.type==='extract')return inVehicle?'Drive to the extraction marker to finish the mission':'Enter any vehicle · E / Triangle to enter · or tap Enter';
+  if(stage.type==='extract')return inVehicle?'Drive to the extraction marker to finish the mission':'Enter any vehicle · E / hold Square · or tap Drive';
   return `Reach ${stage.objective.replace(/^REACH |^ENTER /,'').toLowerCase()} · follow the marker`;
 }
 

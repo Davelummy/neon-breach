@@ -17,6 +17,7 @@ let audio=null,muted=false,muzzleUntil=0,disposed=false,connectionDeadline,hitTi
 let transport=null,connecting=false;
 function unlockAudio(){try{audio||=new (window.AudioContext||window.webkitAudioContext)();audio.resume().catch(()=>{});}catch{muted=true;}}
 function shotAudio(event){if(!audio||muted||audio.state!=='running')return;const me=state?.players.find(p=>p.id===selfId),distance=me?Math.hypot(me.x-event.x,me.y-event.y):20,osc=audio.createOscillator(),gain=audio.createGain(),now=audio.currentTime;osc.type='sawtooth';osc.frequency.setValueAtTime(150,now);osc.frequency.exponentialRampToValueAtTime(45,now+.07);gain.gain.setValueAtTime(.045/(1+distance*.15),now);gain.gain.exponentialRampToValueAtTime(.001,now+.07);osc.connect(gain);gain.connect(audio.destination);osc.start();osc.stop(now+.08);osc.onended=()=>{osc.disconnect();gain.disconnect();};}
+let squareDown=0,squareFired=false;
 const actors=new Map(),vehicleModels=new Map(),keys=new Set(),touch={forward:0,strafe:0,fire:false,reload:false,jump:false,aim:false,sprint:false,interact:false};
 const smoothingVector=new THREE.Vector3();
 const mat=(color,roughness=.7,metalness=.15)=>new THREE.MeshStandardMaterial({color,roughness,metalness});
@@ -34,7 +35,14 @@ const input=()=>{const pad=activePad(),axis=n=>Math.abs(pad?.axes[n]||0)>.15?pad
   if($('board').open)return {type:'input',seq:seq++,forward:0,strafe:0,angle,pitch,fire:false,reload:false,jump:false,aim:false,sprint:false,interact:false};
   if(pad){angle+=axis(2)*2.65*.05;pitch=Math.max(-.65,Math.min(.65,pitch-axis(3)*1.4*.05));}
   angle=Math.atan2(Math.sin(angle),Math.cos(angle));
-  return {type:'input',seq:seq++,forward:Math.max(-1,Math.min(1,(keys.has('KeyW')?1:0)-(keys.has('KeyS')?1:0)+touch.forward-axis(1))),strafe:Math.max(-1,Math.min(1,(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0)+touch.strafe+axis(0))),angle,pitch,fire:keys.has('ShiftLeft')||keys.has('ShiftRight')||touch.fire||!!pad?.buttons[7]?.pressed,reload:keys.has('KeyR')||touch.reload||!!pad?.buttons[2]?.pressed,jump:keys.has('Space')||touch.jump||!!pad?.buttons[0]?.pressed,aim:touch.aim||!!pad?.buttons[6]?.pressed,sprint:keys.has('KeyQ')||touch.sprint||!!pad?.buttons[10]?.pressed,interact:keys.has('KeyE')||touch.interact||!!pad?.buttons[3]?.pressed};};
+  // COD layout (matches the campaign): beside a vehicle, tap Square reloads and a 0.3 s hold enters;
+  // Circle exits while driving; R2 is throttle while driving.
+  const driving=document.body.classList.contains('driving'),usable=!$('vehicleUse').hidden&&!driving,square=!!pad?.buttons[2]?.pressed,now=performance.now();
+  if(square&&!squareDown){squareDown=now;squareFired=false;}
+  const squareUse=square&&usable&&!squareFired&&now-squareDown>=300;if(squareUse)squareFired=true;
+  // Strict booleans: the server rejects any input packet with a non-boolean action field.
+  const squareReload=!!((square&&!usable&&!driving)||(!square&&squareDown&&usable&&!squareFired&&now-squareDown<300));if(!square)squareDown=0;
+  return {type:'input',seq:seq++,forward:Math.max(-1,Math.min(1,(keys.has('KeyW')?1:0)-(keys.has('KeyS')?1:0)+touch.forward-axis(1)+(driving?(pad?.buttons[7]?.value||0):0))),strafe:Math.max(-1,Math.min(1,(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0)+touch.strafe+axis(0))),angle,pitch,fire:keys.has('ShiftLeft')||keys.has('ShiftRight')||touch.fire||(!driving&&!!pad?.buttons[7]?.pressed),reload:keys.has('KeyR')||touch.reload||squareReload,jump:keys.has('Space')||touch.jump||!!pad?.buttons[0]?.pressed,aim:touch.aim||!!pad?.buttons[6]?.pressed,sprint:keys.has('KeyQ')||touch.sprint||!!pad?.buttons[10]?.pressed,interact:keys.has('KeyE')||touch.interact||squareUse||(driving&&!!pad?.buttons[1]?.pressed)};};
 function resetInput(){keys.clear();touch.forward=touch.strafe=0;touch.fire=touch.reload=touch.jump=touch.aim=touch.sprint=touch.interact=false;$('aim')?.setAttribute('aria-pressed','false');$('sprint')?.setAttribute('aria-pressed','false');const knob=$('knob');if(knob)knob.style.transform='';}
 function status(text){const el=$('status');if(el&&!disposed)el.textContent=text;}
 function buildWorld(value){

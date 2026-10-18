@@ -66,11 +66,21 @@ A global leaderboard ranks operatives by best score (emails are masked).
 - L2: Aim
 - R2: Fire
 - L1: Toggle auto-lock
-- R1 or D-pad: Change weapon
-- Square: Reload
-- X: Jump / jet assist / vehicle boost
-- Triangle: Enter or exit vehicle
+- R1, Triangle or D-pad left/right: Change weapon
+- Square: Reload · hold beside a vehicle to drive it (or to use the armory)
+- Circle: Crouch · while sprinting, slide
+- X: Jump / jet assist
 - R3: Close-range finisher
+
+Driving: left stick steers and drives, R2 accelerates, L2 brakes, X boosts,
+D-pad left/right changes radio station, up tunes/plays, down turns the radio off; L1/R1 lowers/raises radio volume,
+Circle gets out.
+
+Vehicle radio keeps one media element primed by your first click, tap or key press;
+subsequent station, playback and volume controls work from the pad. D-pad up also
+retries unavailable/blocked playback. Browser-level sound denial cannot be bypassed:
+if prompted, press Enter or Play once to grant audio permission. Radio stops on exit
+or pause; discovery and stream failures do not trigger an automatic retry loop.
 
 ### Keyboard and mouse
 
@@ -82,7 +92,8 @@ A global leaderboard ranks operatives by best score (emails are masked).
 - Space: Jump / jet assist
 - R: Reload
 - 1–4 or mouse wheel: Change weapon
-- E: Enter or exit vehicle
+- E: Drive or exit a vehicle (N tunes / changes the vehicle radio)
+- C (toggle) or Ctrl (hold): Crouch · while sprinting, slide
 - F: Close-range finisher
 - T: Toggle auto-lock
 - M: Toggle audio
