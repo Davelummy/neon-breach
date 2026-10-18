@@ -18,9 +18,17 @@ test('solid cover blocks server-owned damage and reload is timed',()=>{
   const m=new Match(),a=m.join('a','a'),b=m.join('b','b');m.time=3;Object.assign(a,{x:2.5,y:2.5,angle:0,pitch:0,ammo:1});Object.assign(b,{x:5.5,y:2.5,protectedUntil:0});m.world.map[2][4]=2;m.fire(a);assert.equal(b.hp,100);assert.equal(a.ammo,0);
   m.input(a,command(1,{reload:true}));m.tick();assert.ok(a.reloadUntil>m.time);assert.equal(a.ammo,0);for(let n=0;n<34;n++)m.tick();assert.equal(a.ammo,30);
 });
+test('server stalls advance round, reload and respawn clocks by at most a quarter second',()=>{
+  const m=new Match(),a=m.join('a','a'),b=m.join('b','b');
+  Object.assign(a,{ammo:0,reloadUntil:1});Object.assign(b,{hp:0,deadUntil:1});
+  m.tick(5);assert.equal(m.time,.25);assert.equal(m.remaining,179.75);assert.equal(a.ammo,0);assert.equal(b.hp,0);
+  m.tick(-5);assert.equal(m.time,.25);m.tick(NaN);assert.equal(m.time,.25+RULES.tick);
+  m.tick(Infinity);assert.equal(m.time,.25+2*RULES.tick);
+});
 test('elapsed-time rounds finish, freeze results, and only the host can start the next arena',()=>{
   const m=new Match(),host=m.join('a','a');m.tick(4);assert.equal(m.remaining,180);const peer=m.join('b','b');
-  m.tick(7.5);assert.equal(m.remaining,172.5);host.kills=3;m.tick(180);
+  for(let n=0;n<30;n++)m.tick(.25);assert.equal(m.remaining,172.5);host.kills=3;
+  for(let n=0;n<690;n++)m.tick(.25);
   assert.equal(m.phase,'finished');assert.equal(m.remaining,0);assert.equal(m.round,1);assert.equal(m.world.arena,'city-gate');assert.equal(m.results[0].id,host.id);
   const frozen=JSON.stringify(m.results),ammo=host.ammo;m.fire(host);m.tick(200);assert.equal(host.ammo,ammo);assert.equal(JSON.stringify(m.results),frozen);
   assert.equal(m.restart(peer),false);assert.equal(m.restart(host),true);assert.equal(m.round,2);assert.equal(m.world.arena,'millennium-park');assert.equal(m.remaining,180);assert.equal(m.phase,'playing');assert.ok([...m.players.values()].every(p=>p.hp===100&&p.kills===0));

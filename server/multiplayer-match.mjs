@@ -103,7 +103,8 @@ export class Match {
   }
   tick(elapsed=RULES.tick){
     if(this.phase==='finished')return;
-    const seconds=Number.isFinite(elapsed)&&elapsed>=0?elapsed:RULES.tick;
+    // Bound timer catch-up after stalls; movement still takes one fixed step.
+    const seconds=Number.isFinite(elapsed)?Math.min(.25,Math.max(0,elapsed)):RULES.tick;
     this.time+=seconds;
     if(this.players.size>=2)this.remaining=Math.max(0,this.remaining-seconds);
     if(this.remaining<=0){this.finish();return;}

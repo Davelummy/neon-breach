@@ -23,10 +23,12 @@ test('real authenticated sockets share one bounded room and reject cross-origin/
   async function wait(client,predicate){for(let i=0;i<60;i++){const result=client.messages.find(predicate);if(result)return result;await delay(50);}throw Error('Socket state timed out');}
   try{
     await rejected('none',origin,401);await rejected('a','http://untrusted.invalid',403);
-    const a=await connect('a');a.ws.send(JSON.stringify({type:'create',arena:'city-gate'}));const joined=await wait(a,v=>v.type==='joined');assert.match(joined.code,/^[A-F0-9]{10}$/);
+    // Client-supplied QA/duration fields must never shorten production rooms.
+    const a=await connect('a');a.ws.send(JSON.stringify({type:'create',arena:'city-gate',qaRound:true,roundSeconds:8}));const joined=await wait(a,v=>v.type==='joined');assert.match(joined.code,/^[A-F0-9]{10}$/);
     await rejected('a',origin,409);
     const b=await connect('b');b.ws.send(JSON.stringify({type:'join',code:joined.code}));await wait(b,v=>v.type==='joined');
     const before=await wait(a,v=>v.type==='state'&&v.players.length===2),player=before.players.find(p=>p.id===joined.id);
+    assert.ok(before.remaining>175&&before.remaining<=180);
     a.ws.send(JSON.stringify({type:'input',seq:1,forward:1,strafe:0,angle:0,pitch:0,fire:false,reload:false,jump:false,hp:9999}));
     const moved=await wait(b,v=>v.type==='state'&&v.players.some(p=>p.id===joined.id&&p.ack===1));const remote=moved.players.find(p=>p.id===joined.id);assert.ok(remote.x>player.x);assert.equal(remote.hp,100);
     for(let i=0;i<70;i++)a.ws.send(JSON.stringify({type:'input',seq:i+2,forward:0,strafe:0,angle:0,pitch:0,fire:false,reload:false,jump:false}));

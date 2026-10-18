@@ -11,6 +11,7 @@
     "qa": "node scripts/qa-smoke.mjs",
     "qa:responsive": "node scripts/qa-responsive.mjs",
     "qa:multiplayer": "node scripts/qa-multiplayer.mjs",
+    "qa:multiplayer:release": "node scripts/qa-multiplayer.mjs --full-round",
     "qa:guest": "node scripts/qa-guest.mjs",
     "qa:visual": "node scripts/qa-visual.mjs",
     "qa:arena-preview": "node scripts/qa-arena-preview.mjs",
