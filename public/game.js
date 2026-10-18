@@ -8,7 +8,7 @@ import { MAP_W, MAP_H, GROUND_HEIGHT, WALL_HEIGHTS, DIFFICULTIES, ENEMY_TYPES, W
 import { AudioSystem } from '/audio.js';
 import { requestLandscape, initializeInterface } from '/mobile-controls.js';
 import {LIVE_STATIONS,VehicleRadio,discoverStations,cachedStations} from '/vehicle-radio.js';
-import {rayVehicleDistance,blastDamage,encounterExtras,MAX_LIVE_ENEMIES,vehicleIntegrity,vehicleBallisticDamage,vehicleImpactDamage,enemyPerception,tacticalShotSpread,perceptionDue,shareObservation,reinforcementEntry} from '/combat-rules.js';
+import {gradeRun,rayVehicleDistance,blastDamage,encounterExtras,MAX_LIVE_ENEMIES,vehicleIntegrity,vehicleBallisticDamage,vehicleImpactDamage,enemyPerception,tacticalShotSpread,perceptionDue,shareObservation,reinforcementEntry} from '/combat-rules.js';
 import {captureCheckpoint,restoreCheckpoint} from '/checkpoint.js';
 import {readWallet,buyGun,mergeWallets,GUN_PRICES,createCityLife,updateCityLife} from '/city-life.js';
 import {updateVehicleHandling} from '/vehicle-handling.js';
@@ -35,7 +35,7 @@ let accountCheckPending=true;
 
     const state = {
       mode: 'menu', difficulty: 'operative', arenaId:'city-gate',layoutVersion:0,wave: 0, wavePhase: 'idle', waveTimer: 0,
-      pending: [], spawnTimer: 0, initialWaveCount: 0, enemies: [], projectiles: [], pickups: [], particles: [], cars: [],
+      pending: [], spawnTimer: 0, initialWaveCount: 0, enemies: [], projectiles: [], pickups: [], particles: [], tracers: [], cars: [],
       lastTime: 0, totalTime: 0, announcementTimer: 0, messageTimer: 0, screenShake: 0, muzzle: 0, melee: 0,
       musicTimer: 0, musicStep: 0, muted: false, touch: coarsePointer, qaInvulnerable: false,
       slowMo:0, eliteSpawned:false, objective:'HOLD THE ARES GRID', threatPulse:0, takedowns:0, roadkills:0, shieldFlash:0, armorFlash:0,
@@ -61,12 +61,13 @@ let accountCheckPending=true;
       spread: 0, recoil: 0, recoilKick: 0, recoilYaw: 0, swayX: 0, swayY: 0, breath: 0, sprintLock: 0, lookVx: 0, lookVy: 0,
       bob: 0, bobAmount: 0, score: 0, kills: 0, combo: 1, comboTimer: 0,
       hurtTimer: 0, alive: true, shots: 0, hits: 0, grounded: true, jetFuel: 100, jetting: false, ads: 0, stepTimer: 0, jetSoundTimer: 0, heartTimer: 0,
-      weaponIndex:0,weaponSlots:[],carIndex:-1,gamepadAimValue:0,moveVx:0,moveVy:0,strafe:0
+      weaponIndex:0,weaponSlots:[],carIndex:-1,gamepadAimValue:0,moveVx:0,moveVy:0,strafe:0,
+      crouch:0,crouchToggle:false,wasCrouch:false,wasSliding:false,slideTimer:0,slideCooldown:0,wasJetting:false,jetIgnite:0,jetFov:0
     };
     const renderCamera = { x: 0, y: 0, z: 0, dir: 0, pitch: 0, roll: 0 };
     const threeFrame = {};
 
-    const input = { forward:false, back:false, left:false, right:false, sprint:false, fire:false, shiftFire:false, pointerFire:false, aim:false, jump:false,gamepadFire:false,gamepadAim:false,gamepadAimValue:0,gamepadJump:false,gamepadSprint:false };
+    const input = { forward:false, back:false, left:false, right:false, sprint:false, fire:false, shiftFire:false, pointerFire:false, aim:false, jump:false,gamepadFire:false,gamepadAim:false,gamepadAimValue:0,gamepadJump:false,gamepadSprint:false,crouchHold:false };
     let moveAxis = {x:0,y:0};
     let controllerAxis = {x:0,y:0};
     let gamepadPrevious = [];
@@ -114,7 +115,6 @@ let accountCheckPending=true;
     function weaponUnlocked(index){return Number.isInteger(index)&&index>=0&&index<WEAPONS.length&&(readWallet(interfaceStorage,accountUser()?.id).owned.includes(index)||meetsUnlock(WEAPONS[index].unlock));}
     function saveWallet(wallet){try{interfaceStorage?.setItem(`neon-wallet:${accountUser()?.id}`,JSON.stringify(wallet));return !!interfaceStorage;}catch{return false;}}
     function toggleNightVision(){state.nightVision=!state.nightVision;updateNightVision();$('nightVisionButton').textContent=state.nightVision?'NVG ON':'NVG OFF';$('nightVisionButton').setAttribute('aria-pressed',String(state.nightVision));showMessage(state.nightVision?'NIGHT VISION ON':'NIGHT VISION OFF');}
-    function toggleView(){state.viewMode=state.viewMode==='first'?'third':'first';$('viewButton').textContent=state.viewMode==='third'?'VIEW 3P':'VIEW 1P';showMessage(state.viewMode==='third'?'THIRD PERSON · V / TOUCH VIEW / CONTROLLER TOUCHPAD':'FIRST PERSON');}
     function nearGunShop(){return state.gunShop&&player.carIndex<0&&Math.hypot(player.x-state.gunShop.x,player.y-state.gunShop.y)<2;}
     function weaponCardState(index,selected=false){const locked=!weaponUnlocked(index),unlock=locked&&weaponUnlockProgress(index);return {selected,locked,label:selected?'Selected':locked?(unlock?.target>1?`Locked · ${unlock.current}/${unlock.target}`:'Locked'):'Available'};}
     const UNLOCK_NOUNS={kills:'eliminations',takedowns:'finishers',roadkills:'roadkills',victories:'wins'};
@@ -386,7 +386,7 @@ let accountCheckPending=true;
     }
 
     function resetPlayer() {
-      Object.assign(player,{x:11.5,y:18.5,z:GROUND_HEIGHT,vz:0,dir:-Math.PI/2,pitch:0,health:100,shield:50,armor:100,shieldDelay:0,ammo:30,reserve:120,fireCooldown:0,reloading:false,reloadTimer:0,spread:0,recoil:0,recoilKick:0,recoilYaw:0,swayX:0,swayY:0,breath:0,sprintLock:0,lookVx:0,lookVy:0,bob:0,bobAmount:0,score:0,kills:0,combo:1,comboTimer:0,hurtTimer:0,alive:true,shots:0,hits:0,grounded:true,jetFuel:100,jetting:false,ads:0,stepTimer:0,jetSoundTimer:0,heartTimer:0,weaponIndex:0,weaponSlots:WEAPONS.map(cfg=>({ammo:cfg.mag,reserve:cfg.reserve})),carIndex:-1,gamepadAimValue:0,moveVx:0,moveVy:0,strafe:0});
+      Object.assign(player,{x:11.5,y:18.5,z:GROUND_HEIGHT,vz:0,dir:-Math.PI/2,pitch:0,health:100,shield:50,armor:100,shieldDelay:0,ammo:30,reserve:120,fireCooldown:0,reloading:false,reloadTimer:0,spread:0,recoil:0,recoilKick:0,recoilYaw:0,swayX:0,swayY:0,breath:0,sprintLock:0,lookVx:0,lookVy:0,bob:0,bobAmount:0,score:0,kills:0,combo:1,comboTimer:0,hurtTimer:0,alive:true,shots:0,hits:0,grounded:true,jetFuel:100,jetting:false,ads:0,stepTimer:0,jetSoundTimer:0,heartTimer:0,weaponIndex:0,weaponSlots:WEAPONS.map(cfg=>({ammo:cfg.mag,reserve:cfg.reserve})),carIndex:-1,gamepadAimValue:0,moveVx:0,moveVy:0,strafe:0,crouch:0,crouchToggle:false,wasCrouch:false,wasSliding:false,slideTimer:0,slideCooldown:0,wasJetting:false,jetIgnite:0,jetFov:0});
       equipWeapon(0,true);
     }
 
@@ -626,8 +626,8 @@ let accountCheckPending=true;
       // Board on touchdown before movement can hide the proximity button.
       $('vehicleButton')?.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();toggleVehicle();});
       $('vehicleButton')?.addEventListener('click',e=>{if(e.detail===0)toggleVehicle();});
-      $('viewButton').onclick=toggleView;$('nightVisionButton').onclick=toggleNightVision;
-      $('pausedNvg').onclick=toggleNightVision;$('pausedView').onclick=toggleView;$('campaignTime').onchange=()=>setMissionTime($('campaignTime').value);
+      $('nightVisionButton').onclick=toggleNightVision;
+      $('pausedNvg').onclick=toggleNightVision;$('campaignTime').onchange=()=>setMissionTime($('campaignTime').value);
       const loadout=$('loadoutWeapon');
       if(loadout){loadout.replaceChildren();WEAPONS.forEach((weapon,index)=>{const option=document.createElement('option');option.value=String(index);option.textContent=`${weapon.name} · ${weapon.mag} rounds`;loadout.append(option);});loadout.value=String(selectedLoadout);loadout.addEventListener('change',()=>{selectStartingWeapon(Number(loadout.value));loadout.value=String(selectedLoadout);});}
       const station=$('radioStation'),musicVolume=$('radioVolume');
@@ -990,7 +990,7 @@ let accountCheckPending=true;
         if(!state.autoLock)setAutoLock(true,false,false);
       }
       if(!saved&&state.daily?.rules?.weaponLock!=null)equipWeapon(state.daily.rules.weaponLock,true);
-      const vehicleHp=perkUnlocked('hull')?perkApply('hull').vehicleHp:100;Object.assign(state,{mode:'playing',wave:resumeStage+1,wavePhase:'mission',waveTimer:0,pending:[],spawnTimer:0,initialWaveCount:1,enemies:[],projectiles:[],pickups:[],particles:[],corpses:[],bloodDecals:[],brokenGlass:new Set(),cars:CAR_SPAWNS.map((car,index)=>({...car,index,occupied:false,speed:0,hp:vehicleIntegrity(car.kind,vehicleHp),maxHp:vehicleIntegrity(car.kind,vehicleHp),boost:100,engineTimer:0,steer:0,groundOffset:0})),totalTime:saved?Number(saved.elapsed_seconds||0):0,announcementTimer:0,messageTimer:0,screenShake:0,muzzle:0,melee:0,musicTimer:.2,musicStep:0,slowMo:0,hitStop:0,eliteSpawned:false,objective:stages[resumeStage].objective,objectiveTarget:[...stages[resumeStage].target],missionStage:resumeStage,missionHold:stages[resumeStage].hold||22,missionSpawnStep:0,missionProgress:0,commsTimer:0,commander:null,extractionArmed:false,tutorialStep:saved?99:0,threatPulse:0,takedowns:saved?Number(saved.takedowns||0):0,roadkills:saved?Number(saved.roadkills||0):0,shieldFlash:0,armorFlash:0,squadAlert:0,lockTarget:null,destroyNodes:[],finisherCam:null,comboPeak:1,damageTaken:0,lastMedals:[]});
+      const vehicleHp=perkUnlocked('hull')?perkApply('hull').vehicleHp:100;Object.assign(state,{mode:'playing',wave:resumeStage+1,wavePhase:'mission',waveTimer:0,pending:[],spawnTimer:0,initialWaveCount:1,enemies:[],projectiles:[],pickups:[],particles:[],tracers:[],corpses:[],bloodDecals:[],brokenGlass:new Set(),cars:CAR_SPAWNS.map((car,index)=>({...car,index,occupied:false,speed:0,hp:vehicleIntegrity(car.kind,vehicleHp),maxHp:vehicleIntegrity(car.kind,vehicleHp),boost:100,engineTimer:0,steer:0,groundOffset:0})),totalTime:saved?Number(saved.elapsed_seconds||0):0,announcementTimer:0,messageTimer:0,screenShake:0,muzzle:0,melee:0,musicTimer:.2,musicStep:0,slowMo:0,hitStop:0,eliteSpawned:false,objective:stages[resumeStage].objective,objectiveTarget:[...stages[resumeStage].target],missionStage:resumeStage,missionHold:stages[resumeStage].hold||22,missionSpawnStep:0,missionProgress:0,commsTimer:0,commander:null,extractionArmed:false,tutorialStep:saved?99:0,threatPulse:0,takedowns:saved?Number(saved.takedowns||0):0,roadkills:saved?Number(saved.roadkills||0):0,shieldFlash:0,armorFlash:0,squadAlert:0,lockTarget:null,destroyNodes:[],finisherCam:null,comboPeak:1,damageTaken:0,lastMedals:[]});
       if(saved){player.health=Math.max(1,Number(saved.health||100));player.shield=Math.max(0,Number(saved.shield??50));player.armor=Math.max(0,Number(saved.armor??100));player.score=Number(saved.score||0);player.kills=Number(saved.kills||0);player.shots=Number(saved.shots||0);player.hits=Number(saved.hits||0);equipWeapon(Number(saved.weapon_index||0),true);campaignCloud.id=Number(saved.id);}else campaignCloud.id=null;
       applyPerks(!saved);
       clearMenuFocus();
@@ -1068,6 +1068,7 @@ let accountCheckPending=true;
     }
     function startGameplayRadio(){audio?.stopRadio();liveRadio.start({inVehicle:player.carIndex>=0,playing:state.mode==='playing',station:radioStation,volume:radioVolume*(state.masterVolume??.28),muted:state.muted});updateRadioLabel();}
     function pauseGame(){
+      audio?.jetThrust?.(false);player.wasJetting=false;
       if(state.mode!=='playing')return;
       $('gunShopPanel').hidden=true;
       $('campaignTime').value=state.timeOfDay;$('campaignViewOptions').open=false;
@@ -1098,6 +1099,7 @@ let accountCheckPending=true;
     }
 
     function endGame(victory=false){
+      audio?.jetThrust?.(false);player.wasJetting=false;
       $('pausedMission').hidden=true;
       audio?.stopRadio();liveRadio.stop();$('gameRadio').hidden=true;
       audio?.say(victory?'victory':'game-over',true);
@@ -1123,7 +1125,7 @@ let accountCheckPending=true;
       const medalText=medals.length?` Medals: ${medals.map(m=>m.name).join(', ')}.`:'';
       const failNudge=!victory?(state.familyMode?' Try again — Family mode keeps you in the fight.':' Tip: switch to Recruit or turn on Family mode in Settings.'):'';
       $('modalText').textContent=victory?`${op.debriefVictory} Extracted in ${minutes}:${String(seconds).padStart(2,'0')}.${isBest?' New personal best!':''}${medalText}`:`${getCallsign()} was lost during ${missionStages()[state.missionStage]?.title||op.name}.${isBest?' Still a new personal best on the board.':''}${medalText}${failNudge}`;
-      const gradePoints=(accuracy>=55?2:accuracy>=38?1:0)+(player.health>=65?2:player.health>=30?1:0)+(state.totalTime<480?2:state.totalTime<720?1:0)+(player.kills>=16?2:player.kills>=10?1:0)+Math.min(2,medals.length),grade=victory?(gradePoints>=8?'S':gradePoints>=6?'A':gradePoints>=3?'B':'C'):'D';$('resultScore').textContent=finalScore.toLocaleString();$('resultKills').textContent=player.kills;$('resultAccuracy').textContent=`${accuracy}%`;$('resultTime').textContent=`${minutes}:${String(seconds).padStart(2,'0')}`;$('resultGrade').textContent=grade;
+      const grade=gradeRun({victory,accuracy,shots:player.shots,health:player.health,totalTime:state.totalTime,kills:player.kills,medals:medals.length});$('resultScore').textContent=finalScore.toLocaleString();$('resultKills').textContent=player.kills;$('resultAccuracy').textContent=player.shots?`${accuracy}%`:'—';$('resultTime').textContent=`${minutes}:${String(seconds).padStart(2,'0')}`;$('resultGrade').textContent=grade;
       const medalRow=$('resultMedals');if(medalRow){medalRow.textContent=medals.length?medals.map(m=>m.name).join(' · '):'NO MEDALS';medalRow.parentElement?.classList.toggle('hidden',false);}
       $('resultGrid').classList.remove('hidden');$('resumeButton').textContent='Play again';$('quitButton').classList.remove('hidden');
       const shareBtn=$('shareScoreButton');
@@ -1371,7 +1373,7 @@ let accountCheckPending=true;
       const down=pad.buttons.map(button=>button.pressed||button.value>.5),pressed=index=>down[index]&&!gamepadPrevious[index];
       // Options: pause / resume only — never skip the menu into a deploy.
       if(pressed(9)){if($('weaponPreviewDialog')?.open)$('weaponPreviewDialog').close();else if(state.mode==='playing')pauseGame();else if(state.mode==='paused')resumeGame();}
-      if(pressed(4)&&state.mode==='playing')toggleAutoLock();if(pressed(17)&&state.mode==='playing')toggleView();if(pressed(8)&&state.mode==='playing')toggleNightVision();
+      if(pressed(4)&&state.mode==='playing')toggleAutoLock();if(pressed(8)&&state.mode==='playing')toggleNightVision();
       if(state.mode!=='playing'){
         controllerAxis={x:0,y:0};input.gamepadFire=input.gamepadAim=input.gamepadJump=input.gamepadSprint=false;input.gamepadAimValue=0;
         updateMenuGamepad(pad,down,pressed,dt);
@@ -1380,7 +1382,7 @@ let accountCheckPending=true;
       controllerAxis={x:deadzone(pad.axes[0]||0),y:deadzone(pad.axes[1]||0)+(down[13]?1:0)-(down[12]?1:0)};
       const sens=lookScale(),lookX=deadzone(pad.axes[2]||0,.12)*sens,lookY=deadzone(pad.axes[3]||0,.12)*sens*pitchSign();turnLook(lookX*2.65*dt);player.pitch=Math.max(-canvas.height*.2,Math.min(canvas.height*.2,player.pitch-lookY*canvas.height*.75*dt));
       input.gamepadFire=!!down[7];input.gamepadAimValue=pad.buttons[6]?.value||0;input.gamepadAim=input.gamepadAimValue>.08;input.gamepadJump=!!down[0];input.gamepadSprint=!!down[10];
-      if(pressed(0)&&player.carIndex<0)startJump();if(pressed(2))reload();if(pressed(3)||(pressed(1)&&player.carIndex>=0))toggleVehicle();if(pressed(11))meleeTakedown();if(pressed(5)&&player.carIndex<0)cycleWeapon(1);if(pressed(14))cycleWeapon(-1);if(pressed(15))cycleWeapon(1);gamepadPrevious=down;
+      if(pressed(0)&&player.carIndex<0)startJump();if(pressed(1)&&player.carIndex<0)toggleCrouch();if(pressed(2))reload();if(pressed(3)||(pressed(1)&&player.carIndex>=0))toggleVehicle();if(pressed(11))meleeTakedown();if(pressed(5)&&player.carIndex<0)cycleWeapon(1);if(pressed(14))cycleWeapon(-1);if(pressed(15))cycleWeapon(1);gamepadPrevious=down;
     }
 
     let hudRefreshTimer=0,cityTimer=0,cityElapsed=0;
@@ -1444,28 +1446,55 @@ let accountCheckPending=true;
       let f=(input.forward?1:0)-(input.back?1:0)-moveAxis.y-controllerAxis.y, s=(input.right?1:0)-(input.left?1:0)+moveAxis.x+controllerAxis.x;
       const len=Math.hypot(f,s);if(len>1&&player.carIndex<0){f/=len;s/=len;}
       player.strafe+=(s-player.strafe)*Math.min(1,dt*8);
-      const sprinting=player.carIndex<0&&(input.sprint||input.gamepadSprint)&&f>.25&&!player.reloading&&player.ads<.15;
+      // Stance: crouch toggles (C / Circle / touch) or holds (Ctrl). Crouching from a sprint starts a slide.
+      player.slideCooldown=Math.max(0,player.slideCooldown-dt);
+      const sprintHeld=input.sprint||input.gamepadSprint;
+      if(player.carIndex>=0){player.crouchToggle=false;player.slideTimer=0;}
+      // Sprinting stands a settled crouch back up (not a fresh press, and not mid-slide).
+      if(sprintHeld&&player.crouchToggle&&player.wasCrouch&&player.slideTimer<=0&&!player.wasSliding)player.crouchToggle=false;
+      const wantCrouch=player.carIndex<0&&(player.crouchToggle||input.crouchHold);
+      if(wantCrouch&&!player.wasCrouch&&player.grounded&&player.slideCooldown<=0&&Math.hypot(player.moveVx,player.moveVy)>3.3){
+        player.slideTimer=.62;player.slideCooldown=1.15;const boost=1.32;player.moveVx*=boost;player.moveVy*=boost;audio?.land?.();rumble(.18,.3,70);
+      }
+      player.wasCrouch=wantCrouch;player.wasSliding=player.slideTimer>0;
+      if(player.slideTimer>0){player.slideTimer-=dt;if(Math.hypot(player.moveVx,player.moveVy)<1.25||!player.grounded)player.slideTimer=0;}
+      const sliding=player.slideTimer>0;
+      player.crouch+=((wantCrouch||sliding?1:0)-player.crouch)*Math.min(1,dt*12);
+      const sprinting=player.carIndex<0&&sprintHeld&&!wantCrouch&&f>.25&&!player.reloading&&player.ads<.15;
       if(sprinting)player.sprintLock=.16;
       if(player.carIndex>=0){
         const car=state.cars[player.carIndex],previousDir=car.dir,boosting=updateVehicleHandling(car,f,s,input.jump||input.gamepadJump,input.aim||input.gamepadAim,dt);
-        const previousX=car.x,previousY=car.y,nx=car.x+Math.cos(car.dir)*car.speed*dt,ny=car.y+Math.sin(car.dir)*car.speed*dt;if(canMoveVehicle(nx,ny,player.carIndex)){car.x=nx;car.y=ny;}else{const impact=Math.abs(car.speed);car.dir=previousDir;car.speed=0;state.screenShake=.65;rumble(.4,.6,85);if(impact>3.8)damageVehicle(car,impact*2.3);}
+        const previousX=car.x,previousY=car.y,nx=car.x+Math.cos(car.dir)*car.speed*dt,ny=car.y+Math.sin(car.dir)*car.speed*dt;if(canMoveVehicle(nx,ny,player.carIndex)){car.x=nx;car.y=ny;}
+        // Glancing contact scrapes along the wall instead of stopping dead; a head-on hit bounces back so
+        // the driver can steer away (vehicles cannot turn at zero speed, which used to wedge buses).
+        else if(canMoveVehicle(nx,car.y,player.carIndex)){car.x=nx;car.speed*=.82;state.screenShake=Math.max(state.screenShake,.2);}
+        else if(canMoveVehicle(car.x,ny,player.carIndex)){car.y=ny;car.speed*=.82;state.screenShake=Math.max(state.screenShake,.2);}
+        else{const impact=Math.abs(car.speed);car.dir=previousDir;car.speed=-Math.sign(car.speed||1)*Math.min(1.6,.6+impact*.22);state.screenShake=.65;rumble(.4,.6,85);if(impact>3.8)damageVehicle(car,impact*2.3);}
         for(const enemy of state.enemies){const damage=vehicleImpactDamage(car,previousX,previousY,enemy);if(!damage)continue;enemy.vehicleHitCooldown=.65;enemy.hp-=damage;if(enemy.hp<=0){state.roadkills++;audio?.roadkill();killEnemy(enemy,false,'roadkill');player.score+=200;showMessage('VEHICLE TAKEDOWN // +200');rumble(.72,.9,130);}else{enemy.hitFlash=.18;enemy.dodgeTimer=.4;}car.speed*=.88;}
         car.engineTimer-=dt;if(car.engineTimer<=0&&Math.abs(car.speed)>.35){audio?.engine(car.speed,boosting);car.engineTimer=boosting?.1:.18;}
-        player.x=car.x;player.y=car.y;player.dir=car.dir;player.z=.62;player.vz=0;player.grounded=true;player.jetting=false;player.jetFuel=Math.min(100,player.jetFuel+dt*18);
+        player.x=car.x;player.y=car.y;player.dir=car.dir;player.z=.62;player.vz=0;player.grounded=true;player.jetting=false;player.wasJetting=false;audio?.jetThrust?.(false);player.jetFuel=Math.min(100,player.jetFuel+dt*18);
       }else{
         // Slight acceleration feel instead of instant max speed.
-        const maxSpeed=(sprinting?4.35:2.9)*(player.hurtTimer>0?.9:1)*(1-player.ads*.28)*(player.grounded?1:1.08)*(player.health<30?.92:1);
+        const maxSpeed=(sprinting?4.35:2.9)*(player.hurtTimer>0?.9:1)*(1-player.ads*.28)*(player.grounded?1:1.08)*(player.health<30?.92:1)*(1-player.crouch*.45);
         const targetVx=(Math.cos(player.dir)*f+Math.cos(player.dir+Math.PI/2)*s)*maxSpeed;
         const targetVy=(Math.sin(player.dir)*f+Math.sin(player.dir+Math.PI/2)*s)*maxSpeed;
-        const accel=player.grounded?(sprinting?16:13):7.5;
-        player.moveVx+=(targetVx-player.moveVx)*Math.min(1,dt*accel);
-        player.moveVy+=(targetVy-player.moveVy)*Math.min(1,dt*accel);
+        const accel=player.grounded?(sprinting?16:13):player.jetting?10.5:7.5;
+        if(sliding){const keep=Math.max(0,1-dt*1.7);player.moveVx*=keep;player.moveVy*=keep;}
+        else{player.moveVx+=(targetVx-player.moveVx)*Math.min(1,dt*accel);player.moveVy+=(targetVy-player.moveVy)*Math.min(1,dt*accel);}
         const dx=player.moveVx*dt,dy=player.moveVy*dt;
         if(canMovePlayer(player.x+dx,player.y,.24))player.x+=dx;else player.moveVx*=.15;
         if(canMovePlayer(player.x,player.y+dy,.24))player.y+=dy;else player.moveVy*=.15;
         const jetBlocked=!!state.daily?.rules?.noJet;
-        player.jetting=!jetBlocked&&(input.jump||input.gamepadJump)&&!player.grounded&&player.jetFuel>0&&player.z<3.8;
-        if(player.jetting){player.vz=Math.min(3.25,player.vz+11.5*dt);player.jetFuel=Math.max(0,player.jetFuel-29*dt);player.jetSoundTimer-=dt;if(player.jetSoundTimer<=0){audio?.jet();player.jetSoundTimer=.13;}}
+        // No hard altitude cut-off: thrust eases toward a hover near the ceiling (on/off switching juddered).
+        const JET_CEILING=3.8,jetHeadroom=Math.max(-.35,Math.min(1,(JET_CEILING-player.z)/1.3));
+        player.jetting=!jetBlocked&&(input.jump||input.gamepadJump)&&!player.grounded&&player.jetFuel>0;
+        if(player.jetting&&!player.wasJetting){player.jetIgnite=.35;for(let n=0;n<12;n++){const a=n/12*Math.PI*2;pushParticle({x:player.x+Math.cos(a)*.12,y:player.y+Math.sin(a)*.12,z:player.z-.05,vx:Math.cos(a)*1.9,vy:Math.sin(a)*1.9,vz:-.2,gravity:.5,life:.32,max:.32,size:1.8,color:n%2?'#9ff7ff':'#e8fdff'});}}
+        player.wasJetting=player.jetting;player.jetIgnite=Math.max(0,(player.jetIgnite||0)-dt);player.jetFov=(player.jetFov||0)+((player.jetting?.055:0)-(player.jetFov||0))*Math.min(1,dt*5);
+        audio?.jetThrust?.(player.jetting,Math.min(1,.45+player.jetFuel/180+Math.max(0,player.vz)/8));
+        if(player.jetting){const climbTarget=3.25*jetHeadroom;player.vz+=(climbTarget-player.vz)*Math.min(1,dt*(player.vz<climbTarget?5.5:9));player.jetFuel=Math.max(0,player.jetFuel-29*dt*(.55+.45*Math.max(0,jetHeadroom)));player.jetSoundTimer-=dt;
+          // Twin exhaust plumes under the pack; read from first person when looking down and in third person.
+          if(player.jetSoundTimer<=0){player.jetSoundTimer=.035;const back=player.dir+Math.PI;for(const side of [-1,1]){const ox=Math.cos(back)*.14+Math.cos(player.dir+Math.PI/2)*side*.09,oy=Math.sin(back)*.14+Math.sin(player.dir+Math.PI/2)*side*.09;pushParticle({x:player.x+ox,y:player.y+oy,z:player.z-.02,vx:ox*1.5+(Math.random()-.5)*.3,vy:oy*1.5+(Math.random()-.5)*.3,vz:-2.6-Math.random()*1.2,gravity:-.6,life:.22+Math.random()*.1,max:.3,size:2.2+Math.random(),color:Math.random()<.35?'#ffffff':Math.random()<.5?'#9ff7ff':'#31f5db'});}}
+          if(player.jetIgnite>0)state.screenShake=Math.max(state.screenShake,.12);}
         else {player.vz-=8.7*dt;const jetMult=player.jetRecharge||1;player.jetFuel=Math.min(100,player.jetFuel+dt*(player.grounded?22:4)*jetMult);}
         player.z+=player.vz*dt;const floorZ=surfaceHeight(player.x,player.y);
         if(player.z<=floorZ){
@@ -1481,7 +1510,7 @@ let accountCheckPending=true;
         }else player.grounded=false;
       }
 
-      player.bobAmount+=(Math.min(1,len)*(sprinting?1.35:1)*(player.grounded?1:0)-player.bobAmount)*Math.min(1,dt*8);player.bob+=dt*(sprinting?13.5:9.5)*Math.max(.12,len);
+      player.bobAmount+=(Math.min(1,len)*(sprinting?1.35:1)*(player.grounded?1:0)*(sliding?0:1-player.crouch*.5)-player.bobAmount)*Math.min(1,dt*8);player.bob+=dt*(sprinting?13.5:9.5)*Math.max(.12,len);
       if(len>.08)player.spread=Math.min(.14,player.spread+dt*(sprinting?.26:.09)*(1-player.ads*.7)*(player.grounded?1:1.35));
       if(player.sprintLock>0)player.spread=Math.min(.16,player.spread+dt*.18);
       if(player.carIndex<0&&player.grounded&&len>.18){player.stepTimer-=dt;if(player.stepTimer<=0){audio?.footstep(sprinting,state.timeOfDay==='night');player.stepTimer=sprinting?.26:.4+(Math.random()*.04);}}else player.stepTimer=0;
@@ -1501,6 +1530,7 @@ let accountCheckPending=true;
       if(player.carIndex<0&&(input.fire||input.gamepadFire)&&!player.reloading&&player.fireCooldown<=0)shoot();
     }
 
+    function toggleCrouch(){if(state.mode!=='playing'||player.carIndex>=0)return;player.crouchToggle=!player.crouchToggle;$('crouchButton')?.setAttribute('aria-pressed',String(player.crouchToggle));}
     function startJump(){
       if(state.mode!=='playing')return;
       if(state.daily?.rules?.noJet){if(player.carIndex<0&&player.grounded){player.vz=2.55;player.grounded=false;showMessage('DEAD THRUSTERS // JUMP ONLY');}return;}
@@ -1562,9 +1592,9 @@ let accountCheckPending=true;
       const noise=opRules().noiseMult||1;state.squadAlert=(state.timeOfDay==='night'?4.2:2.8)*noise;
       state.screenShake=Math.min(.85,state.screenShake+(player.ads>.5?cfg.recoil*.28:cfg.recoil*.5)+(cfg.id==='shotgun'?.14:0));
       audio?.shoot(cfg.id);audio?.brass?.(cfg.id);rumble(cfg.id==='shotgun'?.55:.18,cfg.id==='shotgun'?.75:.35,cfg.id==='shotgun'?90:42);
-      const horizon=canvas.height/2+player.pitch-player.recoilKick*canvas.height*.02,diff=DIFFICULTIES[state.difficulty];let registeredHit=false;
+      const horizon=canvas.height/2+player.pitch-player.recoilKick*canvas.height*.02,diff=DIFFICULTIES[state.difficulty];let registeredHit=false;const shotHits=new Map();
       for(let pellet=0;pellet<cfg.pellets;pellet++){
-        const baseSpread=(player.spread+cfg.spread*(firstShot?.28:.42))*(1-player.ads*.76)+.0012+Math.abs(player.swayX)*.4;
+        const baseSpread=((player.spread+cfg.spread*(firstShot?.28:.42))*(1-player.ads*.76)+.0012+Math.abs(player.swayX)*.4)*(player.slideTimer>0?1.3:1-player.crouch*.25);
         const shotSpread=tacticalShotSpread(baseSpread,Math.hypot(player.moveVx,player.moveVy),player.grounded,player.sprintLock>0);
         const locked=lockEligible&&state.lockTarget&&!state.lockTarget.dead;
         const baseAngle=locked?Math.atan2(state.lockTarget.y-player.y,state.lockTarget.x-player.x):player.dir;
@@ -1595,10 +1625,11 @@ let accountCheckPending=true;
           const targetSpec=ENEMY_TYPES[target.type];
           if(target.cloakTimer>0){damage*=.35;spawnHitParticles(target.x,target.y,'#a66cff');if(state.messageTimer<=0)showMessage('CLOAKED // WEAK CONTACT');}
           if(targetSpec.shieldBlock&&Math.abs(normAngle(target.facing-Math.atan2(player.y-target.y,player.x-target.x)))<(targetSpec.shieldArc??1.1)){damage*=1-targetSpec.shieldBlock;spawnHitParticles(target.x,target.y,'#7fd0ff');if(state.messageTimer<=0)showMessage('KINETIC BARRIER // FLANK OR FINISH THE WARDEN');}
-          target.hp-=damage;target.hitFlash=.12;target.suppression=1;target.awareness=1;target.dodgeTimer=Math.max(target.dodgeTimer,.18);showHit(critical);audio?.hit(critical);spawnBlood(target.x,target.y,critical?1.5:1);
+          target.hp-=damage;target.hitFlash=.12;target.suppression=1;target.awareness=1;target.dodgeTimer=Math.max(target.dodgeTimer,.18);audio?.hit(critical);spawnBlood(target.x,target.y,critical?1.5:1);
+          const tally=shotHits.get(target)||{damage:0,critical:false,kill:false};tally.damage+=damage;tally.critical||=critical;shotHits.set(target,tally);
           // Short hit-stop only — keeps pace crisp.
           state.hitStop=Math.max(state.hitStop,critical?.045:.02);
-          if(target.hp<=0&&!target.dead){state.hitStop=Math.max(state.hitStop,.055);killEnemy(target,critical,critical?'headshot':'shot');}
+          if(target.hp<=0&&!target.dead){state.hitStop=Math.max(state.hitStop,.055);killEnemy(target,critical,critical?'headshot':'shot');tally.kill=true;}
         }else if(carHit){
           if(!carHit.car.destroyed){damageVehicle(carHit.car,vehicleBallisticDamage(cfg.damage*weaponRangeFalloff(cfg,carHit.dist)*diff.playerDamage),true);spawnHitParticles(player.x+Math.cos(angle)*carHit.dist,player.y+Math.sin(angle)*carHit.dist,'#ffbb55');}
           if(pellet===0)audio?.impact?.('metal');
@@ -1615,19 +1646,23 @@ let accountCheckPending=true;
           }
         }
         for(const e of state.enemies){if(e.dead)continue;const ex=e.x-player.x,ey=e.y-player.y,along=ex*Math.cos(angle)+ey*Math.sin(angle),near=Math.abs(ex*Math.sin(angle)-ey*Math.cos(angle));if(along>0&&along<ray.dist+.4&&near<.7)e.suppression=Math.min(1,e.suppression+.32);}
+        if(pellet<3){const end=target?best:carHit?carHit.dist:Math.min(ray.dist,30);pushTracer(angle,end,target?(target.z||GROUND_HEIGHT)+.5:player.z+.62);}
       }
+      let anyCritical=false,anyKill=false;
+      for(const tally of shotHits.values()){spawnDamageNumber(tally.damage,tally.critical,tally.kill);anyCritical||=tally.critical;anyKill||=tally.kill;}
+      if(shotHits.size)showHit(anyCritical,anyKill);
       if(player.ammo===0&&player.reserve>0)setTimeout(()=>{if(state.mode==='playing')reload();},200);
     }
 
     function killEnemy(e,critical,method='shot'){
-      if(e.dead)return;e.dead=true;const spec=ENEMY_TYPES[e.type];player.kills++;player.combo=Math.min(8,player.combo+1);player.comboTimer=3.2;state.comboPeak=Math.max(state.comboPeak,player.combo);
+      if(e.dead)return;e.dead=true;const spec=ENEMY_TYPES[e.type];pushKillFeed(e,method);player.kills++;player.combo=Math.min(8,player.combo+1);player.comboTimer=3.2;state.comboPeak=Math.max(state.comboPeak,player.combo);
       const wallet=readWallet(interfaceStorage,accountUser()?.id);wallet.credits=Math.min(1000000,wallet.credits+20);saveWallet(wallet);
       const methodBonus=method==='takedown'?1.4:method==='roadkill'?1.3:method==='headshot'?1.2:1,eliteBonus=e.elite?1.75:1,gain=Math.round(spec.score*player.combo*(critical?1.25:1)*methodBonus*eliteBonus);player.score+=gain;audio?.kill();$('combo').innerHTML=`<b>x${player.combo} CHAIN</b><small>${e.elite?'ELITE // ':''}${method.toUpperCase()} +${gain}</small>`;$('combo').classList.add('show');
       if(e.commander){const hvt=missionStages().find(s=>s.type==='hvt');audio?.say('hvt-down');showAnnouncement('HVT NEUTRALIZED',`${hvt?.title||'TARGET'} // CONFIRMED`,1.5);showComms('ARES COMMAND',hvt?.confirmComms||'Target confirmed down. Move to your next objective immediately.',4.6);state.screenShake=1;}
       else if(e.elite){showMessage(`ELITE ${spec.name} ELIMINATED`);state.screenShake=Math.max(state.screenShake,.7);}
       if(state.gore){spawnBlood(e.x,e.y,e.elite?2.2:1.55);state.bloodDecals.push({x:e.x+(Math.random()-.5)*.16,y:e.y+(Math.random()-.5)*.16,z:e.z||GROUND_HEIGHT,size:(e.elite?.5:.34)+Math.random()*.18,alpha:.72});if(state.bloodDecals.length>36)state.bloodDecals.shift();}
       // Corpses linger briefly then despawn so the district doesn't fill with bodies.
-      state.corpses.push({x:e.x,y:e.y,z:e.z||GROUND_HEIGHT,type:e.type,variant:e.variant||0,elite:e.elite,commander:e.commander,dir:e.facing,age:0,life:CORPSE_LIFETIME});
+      state.corpses.push({x:e.x,y:e.y,z:e.z||GROUND_HEIGHT,type:e.type,variant:e.variant||0,elite:e.elite,commander:e.commander,dir:e.facing,fall:Math.atan2(e.y-player.y,e.x-player.x),age:0,life:CORPSE_LIFETIME});
       if(state.corpses.length>24)state.corpses.shift();
       spawnDeathParticles(e.x,e.y,e.elite?'#fff6b7':state.gore?'#8f101d':'#617176');
       if(Math.random()<(e.elite ? .86 : .36))dropPickup(e.x,e.y);
@@ -1682,7 +1717,7 @@ let accountCheckPending=true;
     function updateEnemies(dt){
       const diff=DIFFICULTIES[state.difficulty],rules=opRules(),sprinting=input.sprint||input.gamepadSprint,quiet=(state.timeOfDay==='night'||rules.stealth)&&!sprinting&&state.muzzle<=0&&player.carIndex<0;
       const baseSight=state.timeOfDay==='day'?(rules.sightDay||12.5):(quiet?(rules.sightNight||6.4)*.85:(rules.sightNight||9.2));
-      const sightRange=baseSight;state.squadAlert=Math.max(0,state.squadAlert-dt*(quiet?1.4:1));
+      const crouched=player.carIndex<0&&player.crouch>.6&&player.slideTimer<=0,sightRange=baseSight*(crouched?.78:1);state.squadAlert=Math.max(0,state.squadAlert-dt*(quiet?1.4:1));
       for(const e of state.enemies){
         if(e.dead)continue;const spec=ENEMY_TYPES[e.type],wasReloading=e.reloadTimer>0;e.hitFlash=Math.max(0,e.hitFlash-dt);e.muzzleFlash=Math.max(0,(e.muzzleFlash||0)-dt*10);e.spawn=Math.max(0,e.spawn-dt*2.2);e.fireCooldown-=dt;e.meleeCooldown-=dt;e.pathTimer-=dt;e.dodgeTimer=Math.max(0,e.dodgeTimer-dt);e.dashCooldown-=dt;e.chargeCooldown-=dt;e.chargeTimer=Math.max(0,e.chargeTimer-dt);e.jumpCooldown=Math.max(0,e.jumpCooldown-dt);e.landingSquash=Math.max(0,e.landingSquash-dt*4);e.reactionTimer=Math.max(0,e.reactionTimer-dt);e.decisionTimer-=dt;e.suppression=Math.max(0,e.suppression-dt*.24);e.reloadTimer=Math.max(0,e.reloadTimer-dt);if(wasReloading&&e.reloadTimer<=0){e.rounds=e.magazineSize;e.combatState='engage';e.decisionTimer=0;}
         e.vehicleHitCooldown=Math.max(0,(e.vehicleHitCooldown||0)-dt);
@@ -1772,7 +1807,7 @@ let accountCheckPending=true;
             if(Math.random()<.4)audio?.ricochet?.(.5);
             p.life=0;break;
           }
-          const car=state.cars.find(vehicle=>!vehicle.destroyed&&vehicleDistance(vehicle,p.x,p.y)<.06&&p.z>0&&p.z<vehicleBounds(vehicle).height);if(car){damageVehicle(car,vehicleBallisticDamage(p.damage*(car.occupied ? .68 : .9)));spawnHitParticles(p.x,p.y,'#ffbb55');p.life=0;break;}
+          const car=state.cars.find(vehicle=>!vehicle.destroyed&&vehicleDistance(vehicle,p.x,p.y)<.06&&p.z>0&&p.z<vehicleBounds(vehicle).height);if(car){damageVehicle(car,vehicleBallisticDamage(p.damage*(car.occupied ? .68 : .9)*extractionArmor()));spawnHitParticles(p.x,p.y,'#ffbb55');p.life=0;break;}
           const toPlayer=Math.hypot(p.x-player.x,p.y-player.y);
           // Supersonic crack when a round passes close.
           if(!p.flyby&&toPlayer<.55&&toPlayer>.32){p.flyby=true;audio?.flyby?.(toPlayer);}
@@ -1802,6 +1837,9 @@ let accountCheckPending=true;
       player.hurtTimer=.2;state.screenShake=shieldUsed&&!left ? .5 : 1;rumble(shieldUsed&&!left ? .38 : .78,shieldUsed&&!left ? .55 : .92,shieldUsed&&!left?80:120);if(player.health<=0)endGame(false);
     }
 
+    // Extraction vehicles are reinforced against enemy fire: losing every ride to a swarm made the
+    // final phase a coin flip. Ramming, blasts and the player's own shots are unaffected.
+    function extractionArmor(){return missionStages()[state.missionStage]?.type==='extract'?.4:1;}
     function damageVehicle(car,amount,playerCredit=false){
       if(car.destroyed)return;car.hp=Math.max(0,car.hp-amount);state.screenShake=Math.max(state.screenShake,.35);if(car.hp>0)return;
       car.destroyed=true;car.speed=0;spawnDeathParticles(car.x,car.y,'#ff8c57');audio?.explosion();rumble(1,1,240);
@@ -1846,6 +1884,12 @@ let accountCheckPending=true;
       state.particles.push(p);
       if(state.particles.length>MAX_PARTICLES)state.particles.splice(0,state.particles.length-MAX_PARTICLES);
     }
+    // Short-lived player tracers; the 3D layer draws them from a pooled set of streaks.
+    function pushTracer(angle,dist,endZ){
+      if(dist<.6)return;const sx=player.x+Math.cos(angle)*.35+Math.cos(angle+Math.PI/2)*.12,sy=player.y+Math.sin(angle)*.35+Math.sin(angle+Math.PI/2)*.12;
+      state.tracers.push({x:sx,y:sy,z:player.z+.58,ex:player.x+Math.cos(angle)*dist,ey:player.y+Math.sin(angle)*dist,ez:endZ,life:.07,max:.07});
+      if(state.tracers.length>12)state.tracers.shift();
+    }
     function spawnHitParticles(x,y,color){for(let i=0;i<4;i++)pushParticle({x,y,z:.5+Math.random()*.35,vx:(Math.random()-.5)*1.6,vy:(Math.random()-.5)*1.6,vz:.2+Math.random()*1,gravity:5,life:.18+Math.random()*.1,max:.28,color});}
     function spawnImpactSparks(x,y,angle){
       const nx=-Math.cos(angle),ny=-Math.sin(angle);
@@ -1865,6 +1909,7 @@ let accountCheckPending=true;
     function spawnBlood(x,y,intensity=1){if(!state.gore)return;const count=Math.round(7*intensity),impact=Math.atan2(y-player.y,x-player.x),fx=Math.cos(impact),fy=Math.sin(impact),px=-fy,py=fx;for(let i=0;i<count;i++){const forward=.45+Math.random()*1.35*intensity,lateral=(Math.random()-.5)*1*intensity;pushParticle({x:x+(Math.random()-.5)*.05,y:y+(Math.random()-.5)*.05,z:.55+Math.random()*.45,vx:fx*forward+px*lateral,vy:fy*forward+py*lateral,vz:.5+Math.random()*2*intensity,gravity:7,life:.35+Math.random()*.4,max:.8,color:i%3===0?'#d62936':'#6f0711'});}}
     function spawnDeathParticles(x,y,color){for(let i=0;i<12;i++)pushParticle({x,y,z:.4+Math.random()*.4,vx:(Math.random()-.5)*2.4,vy:(Math.random()-.5)*2.4,vz:.25+Math.random()*1.2,gravity:4,life:.55+Math.random()*.35,max:1,color});}
     function updateParticles(dt){
+      for(const tracer of state.tracers)tracer.life-=dt;state.tracers=state.tracers.filter(tracer=>tracer.life>0);
       for(const p of state.particles){
         p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;
         if(Number.isFinite(p.z)){
@@ -1892,10 +1937,10 @@ let accountCheckPending=true;
         const bobLift=player.grounded?Math.abs(Math.sin(player.bob))*player.bobAmount*.018:0;
         const kick=player.recoilKick||0;
         renderCamera.x=player.x;renderCamera.y=player.y;
-        renderCamera.z=player.z+bobLift;
+        renderCamera.z=player.z+bobLift-player.crouch*.22-(player.slideTimer>0?.05:0);
         renderCamera.dir=player.dir+(player.recoilYaw||0)*.35+(player.swayX||0);
         renderCamera.pitch=player.pitch-kick*canvas.height*.022+(player.swayY||0)*canvas.height*.55;
-        renderCamera.roll=(player.strafe||0)*.035+(player.recoilYaw||0)*.08;
+        renderCamera.roll=(player.strafe||0)*.035+(player.recoilYaw||0)*.08+(player.slideTimer>0?.05:0);
         return renderCamera;
       }
       const car=state.cars[player.carIndex],bounds=vehicleBounds(car),height=car.kind==='bus'?2:car.kind==='tricycle'?1.25:.96,minDistance=bounds.halfLength+.45;
@@ -1904,7 +1949,7 @@ let accountCheckPending=true;
       renderCamera.x=cx;renderCamera.y=cy;renderCamera.z=height;renderCamera.dir=car.dir+(car.lookYaw||0);renderCamera.pitch=player.pitch*.28-(car.kind==='bus'?canvas.height*.1:24);renderCamera.roll=0;return renderCamera;
     }
 
-    function viewFov(){return player.carIndex>=0?FOV*(1.12+Math.min(.09,Math.abs(state.cars[player.carIndex].speed)*.008)):FOV*(1-player.ads*weaponConfig().zoom);}
+    function viewFov(){return player.carIndex>=0?FOV*(1.12+Math.min(.09,Math.abs(state.cars[player.carIndex].speed)*.008)):FOV*(1-player.ads*weaponConfig().zoom)*(1+(player.jetFov||0));}
 
     function renderSkyline(w,h,horizon){
       ctx.save();ctx.beginPath();ctx.rect(0,0,w,Math.max(0,horizon+2));ctx.clip();
@@ -2064,7 +2109,25 @@ let accountCheckPending=true;
 
     function showAnnouncement(title,sub,duration=1.8){const a=$('announcement');a.querySelector('strong').textContent=title;a.querySelector('span').textContent=sub;a.classList.add('show');state.announcementTimer=duration;}
     function showMessage(text){$('message').textContent=text;$('message').classList.add('show');state.messageTimer=1.55;}
-    function showHit(critical){const m=$('hitMarker');m.classList.toggle('critical',critical);m.style.opacity='1';m.style.width=critical?'38px':'30px';m.style.height=critical?'38px':'30px';setTimeout(()=>{m.style.opacity='0';m.style.width='30px';m.style.height='30px';},75);}
+    let hitMarkerTimer=0;
+    function showHit(critical,kill=false){const m=$('hitMarker');clearTimeout(hitMarkerTimer);m.classList.toggle('critical',critical&&!kill);m.classList.toggle('kill',kill);const size=kill?44:critical?38:30;m.style.opacity='1';m.style.width=m.style.height=`${size}px`;hitMarkerTimer=setTimeout(()=>{m.style.opacity='0';m.style.width=m.style.height='30px';},kill?220:75);}
+    // One number per target per shot (pellets are summed), drifting up from the reticle.
+    function spawnDamageNumber(amount,critical,kill){
+      const host=$('damageNumbers');if(!host||amount<1)return;
+      while(host.childElementCount>=6)host.firstElementChild.remove();
+      const el=document.createElement('span');el.className=`damage-number${kill?' kill':critical?' critical':''}`;el.textContent=String(Math.round(amount));
+      el.style.left=`${18+Math.random()*26}px`;el.style.top=`${-12-Math.random()*16}px`;
+      el.addEventListener('animationend',()=>el.remove(),{once:true});host.append(el);
+    }
+    function pushKillFeed(e,method){
+      const feed=$('killFeed');if(!feed)return;const spec=ENEMY_TYPES[e.type];
+      const how=method==='roadkill'?(state.cars[player.carIndex]?.name||'VEHICLE'):method==='takedown'?'FINISHER':weaponConfig().short;
+      const li=document.createElement('li');li.className=e.commander?'commander':e.elite?'elite':method==='headshot'?'headshot':'';
+      const who=e.commander?'COMMANDER':`${e.elite?'ELITE ':''}${spec.name}`;
+      li.append(Object.assign(document.createElement('b'),{textContent:how}),` ▸ ${who}${method==='headshot'?' · HEADSHOT':''}`);
+      feed.prepend(li);while(feed.childElementCount>4)feed.lastElementChild.remove();
+      setTimeout(()=>li.classList.add('fading'),3600);setTimeout(()=>li.remove(),4100);
+    }
 
     function campaignPayload(status='active'){
       return {id:campaignCloud.id,status,arena:state.arenaId,operation:state.operation,difficulty:state.difficulty,time_of_day:state.timeOfDay,wave:Math.max(1,state.wave),score:player.score,kills:player.kills,shots:player.shots,hits:player.hits,takedowns:state.takedowns,roadkills:state.roadkills,health:Math.ceil(player.health),shield:Math.ceil(player.shield),armor:Math.ceil(player.armor),weapon_index:player.weaponIndex,elapsed_seconds:Math.floor(state.totalTime)};
@@ -2490,7 +2553,7 @@ let accountCheckPending=true;
 
     function syncFire(){input.fire=input.shiftFire||input.pointerFire;}
     document.addEventListener('pointerdown',()=>{if(state.mode==='playing'&&audio?.ctx?.state!=='running')audio?.resume();},{capture:true});
-    function setKey(code,value){if(code==='KeyW'||code==='ArrowUp')input.forward=value;if(code==='KeyS'||code==='ArrowDown')input.back=value;if(code==='KeyA'||code==='ArrowLeft')input.left=value;if(code==='KeyD'||code==='ArrowRight')input.right=value;if(code==='ShiftLeft'||code==='ShiftRight'){input.shiftFire=value;syncFire();}if(code==='KeyQ')input.sprint=value;if(code==='Space')input.jump=value;}
+    function setKey(code,value){if(code==='KeyW'||code==='ArrowUp')input.forward=value;if(code==='KeyS'||code==='ArrowDown')input.back=value;if(code==='KeyA'||code==='ArrowLeft')input.left=value;if(code==='KeyD'||code==='ArrowRight')input.right=value;if(code==='ShiftLeft'||code==='ShiftRight'){input.shiftFire=value;syncFire();}if(code==='KeyQ')input.sprint=value;if(code==='Space')input.jump=value;if(code==='ControlLeft'||code==='ControlRight')input.crouchHold=value;}
     addEventListener('keydown',e=>{
       if(state.mode==='playing'&&audio?.ctx?.state!=='running')audio?.resume();
       if(state.mode==='paused'&&(e.code==='Escape'||e.code==='KeyP')){e.preventDefault();resumeGame();return;}
@@ -2499,11 +2562,12 @@ let accountCheckPending=true;
       if(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();
       setKey(e.code,true);
       if(e.code==='Space'&&!e.repeat)startJump();
+      if(e.code==='KeyC'&&!e.repeat)toggleCrouch();
       if(e.code==='KeyR'&&!e.repeat)reload();
       if(e.code==='KeyF'&&!e.repeat)meleeTakedown();
       if(e.code==='KeyE'&&!e.repeat)toggleVehicle();
       if(e.code==='KeyT'&&!e.repeat)toggleAutoLock();
-      if(e.code==='KeyB'&&!e.repeat)toggleNightVision();if(e.code==='KeyV'&&!e.repeat)toggleView();
+      if(e.code==='KeyB'&&!e.repeat)toggleNightVision();
       if(/^Digit[1-6]$/.test(e.code)&&!e.repeat)equipWeapon(Number(e.code.slice(-1))-1);
       if(e.code==='KeyM'&&!e.repeat)toggleAudio();
       if(e.code==='KeyN'&&!e.repeat&&!e.target.closest?.('input,select,textarea'))cycleRadioStation(1);
@@ -2618,6 +2682,7 @@ let accountCheckPending=true;
       $('reloadButton').addEventListener('pointerdown',e=>{e.preventDefault();reload();});
       $('weaponButton').addEventListener('pointerdown',e=>{e.preventDefault();cycleWeapon(1);});
       $('meleeButton').addEventListener('pointerdown',e=>{e.preventDefault();meleeTakedown();});
+      $('crouchButton')?.addEventListener('pointerdown',e=>{e.preventDefault();toggleCrouch();});
       const sprint=$('sprintButton');sprint.addEventListener('pointerdown',e=>{input.sprint=true;sprint.setPointerCapture(e.pointerId);});sprint.addEventListener('pointerup',()=>input.sprint=false);sprint.addEventListener('pointercancel',()=>input.sprint=false);
       const jet=$('jetButton');jet.addEventListener('pointerdown',e=>{e.preventDefault();input.jump=true;startJump();jet.setPointerCapture(e.pointerId);});jet.addEventListener('pointerup',()=>input.jump=false);jet.addEventListener('pointercancel',()=>input.jump=false);
       const ads=$('adsButton');ads.addEventListener('pointerdown',e=>{e.preventDefault();input.aim=!input.aim;ads.setAttribute('aria-pressed',String(input.aim));});
@@ -2627,13 +2692,21 @@ let accountCheckPending=true;
 
     if(new URLSearchParams(location.search).has('qa')){
       window.__NEON_QA__={
-        snapshot:()=>({mode:state.mode,operation:state.operation,wave:state.wave,wavePhase:state.wavePhase,missionStage:state.missionStage,missionProgress:state.missionProgress,missionHold:state.missionHold,objective:state.objective,pending:state.pending.length,enemies:state.enemies.length,corpses:state.corpses.length,bloodDecals:state.bloodDecals.length,brokenGlass:state.brokenGlass.size,airborneEnemies:state.enemies.filter(enemy=>!enemy.grounded).length,score:player.score,kills:player.kills,shots:player.shots,hits:player.hits,z:player.z,vz:player.vz,grounded:player.grounded,jetFuel:player.jetFuel,health:player.health,shield:player.shield,armor:player.armor,shieldDelay:player.shieldDelay,ads:player.ads,autoLock:state.autoLock,lockTarget:state.lockTarget?.type||null,gore:state.gore,ammo:player.ammo,weapon:weaponConfig().id,carIndex:player.carIndex,melee:state.melee,destroyLive:state.destroyNodes.filter(n=>!n.dead).length,destroyTotal:state.destroyNodes.length,commanderAbility:state.commander?.activeAbility||null,cloakTimer:state.commander?.cloakTimer||0,tutorialStep:state.tutorialStep,timeOfDay:state.timeOfDay,finisherCam:!!state.finisherCam?.active,comboPeak:state.comboPeak,damageTaken:state.damageTaken,daily:state.daily?.id||null,opId:currentOp()?.id||null}),
+        snapshot:()=>({mode:state.mode,operation:state.operation,wave:state.wave,wavePhase:state.wavePhase,missionStage:state.missionStage,missionProgress:state.missionProgress,missionHold:state.missionHold,objective:state.objective,pending:state.pending.length,enemies:state.enemies.length,corpses:state.corpses.length,bloodDecals:state.bloodDecals.length,brokenGlass:state.brokenGlass.size,airborneEnemies:state.enemies.filter(enemy=>!enemy.grounded).length,score:player.score,kills:player.kills,shots:player.shots,hits:player.hits,z:player.z,vz:player.vz,grounded:player.grounded,jetFuel:player.jetFuel,health:player.health,shield:player.shield,armor:player.armor,shieldDelay:player.shieldDelay,ads:player.ads,autoLock:state.autoLock,lockTarget:state.lockTarget?.type||null,gore:state.gore,ammo:player.ammo,weapon:weaponConfig().id,carIndex:player.carIndex,melee:state.melee,destroyLive:state.destroyNodes.filter(n=>!n.dead).length,destroyTotal:state.destroyNodes.length,commanderAbility:state.commander?.activeAbility||null,cloakTimer:state.commander?.cloakTimer||0,tutorialStep:state.tutorialStep,timeOfDay:state.timeOfDay,finisherCam:!!state.finisherCam?.active,comboPeak:state.comboPeak,damageTaken:state.damageTaken,daily:state.daily?.id||null,opId:currentOp()?.id||null,crouch:player.crouch,sliding:player.slideTimer>0,speed:Math.hypot(player.moveVx,player.moveVy),tracers:state.tracers.length}),
         completePhase:()=>{state.qaInvulnerable=true;const def=missionStages()[state.missionStage];if(def?.type==='defend'){state.missionHold=0;}else if(def?.type==='destroy'){for(const node of state.destroyNodes){node.hp=0;node.dead=true;}advanceMission();}else if(def?.type==='hvt'){const boss=state.enemies.find(enemy=>enemy.commander&&!enemy.dead);if(boss)killEnemy(boss,false);else advanceMission();}else if(def?.type==='extract')window.__NEON_QA__.completeExtraction();else if(state.missionStage<missionStages().length-1)advanceMission();},
         // Board a live vehicle and park it on the beacon; the extract tick arms and confirms it.
         completeExtraction:()=>{const def=missionStages()[state.missionStage];if(state.mode!=='playing'||def?.type!=='extract')return false;if(player.carIndex<0){const index=state.cars.findIndex(car=>!car.destroyed&&!car.occupied);if(index<0)return false;state.cars[index].occupied=true;player.carIndex=index;}const car=state.cars[player.carIndex];[car.x,car.y]=def.beacon;car.speed=0;Object.assign(player,{x:car.x,y:car.y,z:.62,vz:0,grounded:true});return true;},
-        teleport:(x=player.x,y=player.y)=>{player.x=Number(x);player.y=Number(y);player.z=surfaceHeight(player.x,player.y);},
+        teleport:(x=player.x,y=player.y)=>{player.x=Number(x);player.y=Number(y);player.z=surfaceHeight(player.x,player.y);player.vz=0;player.grounded=true;},
         skipWait:()=>{state.waveTimer=0;state.spawnTimer=0},
         setInvulnerable:(value=true)=>{state.qaInvulnerable=!!value;},
+        combatFeedbackTest:()=>{
+          state.enemies=[];state.projectiles=[];state.tracers=[];$('killFeed').replaceChildren();$('damageNumbers').replaceChildren();
+          // Find a clear 5m lane from the player's current spot so the test works in every arena layout.
+          let lane=0;for(let a=0;a<Math.PI*2;a+=Math.PI/8){const ex=player.x+Math.cos(a)*3.5,ey=player.y+Math.sin(a)*3.5;if(castRay(a,player.x,player.y,8,GROUND_HEIGHT).dist>=5&&canMove(ex,ey,.3)){lane=a;break;}}
+          Object.assign(player,{z:GROUND_HEIGHT,carIndex:-1,dir:lane,pitch:0,ads:1,fireCooldown:0,reloading:false,ammo:Math.max(5,player.ammo),recoil:0,recoilKick:0,recoilYaw:0,swayX:0,swayY:0,spread:0});
+          setAutoLock(true,false,false);spawnEnemy('wraith',[player.x+Math.cos(lane)*3.5,player.y+Math.sin(lane)*3.5]);const e=state.enemies[state.enemies.length-1];e.hp=1;state.lockTarget=e;shoot();
+          return {dead:!!e.dead,tracers:state.tracers.length,feed:[...document.querySelectorAll('#killFeed li')].map(li=>li.textContent),numbers:document.querySelectorAll('#damageNumbers .damage-number.kill').length,killMarker:$('hitMarker').classList.contains('kill'),corpseFall:state.corpses.at(-1)?.fall!=null};
+        },
         tacticalProbe:()=>{
           const savedPlayer={...player},savedEnemies=state.enemies,savedProjectiles=state.projectiles,savedAlert=state.squadAlert,savedInitial=state.initialWaveCount;
           try{
@@ -2681,7 +2754,7 @@ let accountCheckPending=true;
         // Never reuse a stale camera snapshot — always recompute from player.
         threeFrame.mode=state.mode;threeFrame.timeOfDay=state.timeOfDay;threeFrame.totalTime=state.totalTime;
         threeFrame.camera=getRenderCamera();state.camera=threeFrame.camera;
-        threeFrame.player=player;threeFrame.enemies=state.enemies;threeFrame.cars=state.cars;threeFrame.corpses=state.corpses;threeFrame.bloodDecals=state.bloodDecals;threeFrame.brokenGlass=state.brokenGlass;threeFrame.projectiles=state.projectiles;threeFrame.pickups=state.pickups;threeFrame.particles=state.particles;threeFrame.muzzle=state.muzzle;threeFrame.melee=state.melee;threeFrame.screenShake=state.screenShake;threeFrame.fov=viewFov();threeFrame.missionStage=state.missionStage;threeFrame.missionProgress=state.missionProgress;threeFrame.objectiveTarget=state.objectiveTarget;threeFrame.wavePhase=state.wavePhase;threeFrame.gore=state.gore;threeFrame.commander=state.commander;threeFrame.destroyNodes=state.destroyNodes;threeFrame.finisherCam=state.finisherCam;
+        threeFrame.player=player;threeFrame.enemies=state.enemies;threeFrame.cars=state.cars;threeFrame.corpses=state.corpses;threeFrame.bloodDecals=state.bloodDecals;threeFrame.brokenGlass=state.brokenGlass;threeFrame.projectiles=state.projectiles;threeFrame.pickups=state.pickups;threeFrame.particles=state.particles;threeFrame.tracers=state.tracers;threeFrame.muzzle=state.muzzle;threeFrame.melee=state.melee;threeFrame.screenShake=state.screenShake;threeFrame.fov=viewFov();threeFrame.missionStage=state.missionStage;threeFrame.missionProgress=state.missionProgress;threeFrame.objectiveTarget=state.objectiveTarget;threeFrame.wavePhase=state.wavePhase;threeFrame.gore=state.gore;threeFrame.commander=state.commander;threeFrame.destroyNodes=state.destroyNodes;threeFrame.finisherCam=state.finisherCam;
         threeFrame.opId=currentOp()?.id||null;
         threeFrame.arenaId=state.arenaId;threeFrame.layoutVersion=state.layoutVersion;
         threeFrame.nightVision=state.mode==='playing'&&state.nightVision;threeFrame.viewMode=state.viewMode;threeFrame.civilians=state.civilians;threeFrame.gunShop=state.gunShop;

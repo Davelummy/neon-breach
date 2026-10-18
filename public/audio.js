@@ -284,6 +284,43 @@ export class AudioSystem {
     }, 90 + intensity * 30);
   }
   jet() { this.burst(.07,.045,760); this.tone(92,.08,'sawtooth',.035,78); }
+  // Continuous jet thrust: looping filtered airflow + low rumble that follow thrust intensity,
+  // with an ignition whoosh and a release sigh. Call every frame; it is cheap when unchanged.
+  jetThrust(on, intensity = 1) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, k = Math.max(0, Math.min(1, intensity));
+    if (on && !this.muted()) {
+      if (!this.jetNodes) {
+        const src = this.ctx.createBufferSource(), band = this.ctx.createBiquadFilter(), low = this.ctx.createBiquadFilter(), gain = this.ctx.createGain();
+        const osc = this.ctx.createOscillator(), rumbleFilter = this.ctx.createBiquadFilter(), rumbleGain = this.ctx.createGain();
+        src.buffer = this.noise; src.loop = true; band.type = 'bandpass'; band.Q.value = .9; band.frequency.value = 700; low.type = 'lowpass'; low.frequency.value = 5200;
+        gain.gain.setValueAtTime(.0001, t); osc.type = 'sawtooth'; osc.frequency.value = 62; rumbleFilter.type = 'lowpass'; rumbleFilter.frequency.value = 190; rumbleGain.gain.setValueAtTime(.0001, t);
+        src.connect(band); band.connect(low); low.connect(gain); gain.connect(this.output || this.master);
+        osc.connect(rumbleFilter); rumbleFilter.connect(rumbleGain); rumbleGain.connect(this.output || this.master);
+        src.start(t); osc.start(t);
+        this.jetNodes = { src, band, gain, osc, rumbleGain, last: 0 };
+        this.jetSweep(480, 2900, .32, .15);
+      }
+      const n = this.jetNodes;
+      if (t - n.last < .045) return; n.last = t;
+      n.band.frequency.setTargetAtTime(950 + k * 1700, t, .07);
+      n.gain.gain.setTargetAtTime(.045 + k * .075, t, .05);
+      n.osc.frequency.setTargetAtTime(58 + k * 22, t, .1);
+      n.rumbleGain.gain.setTargetAtTime(.018 + k * .03, t, .07);
+    } else if (this.jetNodes) {
+      const n = this.jetNodes; this.jetNodes = null;
+      n.gain.gain.setTargetAtTime(.0001, t, .08); n.rumbleGain.gain.setTargetAtTime(.0001, t, .08);
+      n.src.stop(t + .6); n.osc.stop(t + .6);
+      if (!this.muted()) this.jetSweep(2000, 420, .34, .055);
+    }
+  }
+  jetSweep(from, to, duration, volume) {
+    const t = this.ctx.currentTime, s = this.ctx.createBufferSource(), band = this.ctx.createBiquadFilter(), g = this.ctx.createGain();
+    s.buffer = this.noise; s.loop = true; band.type = 'bandpass'; band.Q.value = 1.4;
+    band.frequency.setValueAtTime(from, t); band.frequency.exponentialRampToValueAtTime(to, t + duration);
+    g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(volume, t + duration * .35); g.gain.exponentialRampToValueAtTime(.0001, t + duration * 1.3);
+    s.connect(band); band.connect(g); g.connect(this.output || this.master); s.start(t); s.stop(t + duration * 1.35);
+  }
   land() { this.burst(.1,.11,240); this.tone(52,.14,'sine',.09,28); this.burst(.08,.05,600,40,.03,.2); }
   glass() { this.burst(.12,.16,11800,2600,0,.38);this.burst(.28,.07,6200,1800,.035,.55);this.tone(1850,.08,'triangle',.045,720); }
   melee() { this.burst(.045,.18,720,80);this.tone(96,.1,'sawtooth',.13,42);this.burst(.11,.08,260,20,.045,.25); }

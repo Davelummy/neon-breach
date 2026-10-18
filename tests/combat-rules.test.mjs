@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {rayVehicleDistance,blastDamage,encounterExtras,MAX_LIVE_ENEMIES,vehicleIntegrity,vehicleBallisticDamage,vehicleImpactDamage,enemyPerception,tacticalShotSpread,perceptionDue,shareObservation,reinforcementEntry} from '../public/combat-rules.js';
+import {gradeRun,MIN_GRADED_SHOTS,rayVehicleDistance,blastDamage,encounterExtras,MAX_LIVE_ENEMIES,vehicleIntegrity,vehicleBallisticDamage,vehicleImpactDamage,enemyPerception,tacticalShotSpread,perceptionDue,shareObservation,reinforcementEntry} from '../public/combat-rules.js';
 
 test('tactical spread rewards stable grounded shooting, not sprinting or flight',()=>{
   assert.equal(tacticalShotSpread(.02,0,true,false),.02);
@@ -67,4 +67,13 @@ test('roadkills use full vehicle bounds, swept movement and reverse driving',()=
 });
 test('unaware guards have directional sight but hear nearby vehicles and gunfire',()=>{
   const guard={facing:0,awareness:0};assert.equal(enemyPerception(guard,5,0,5),true);assert.equal(enemyPerception(guard,-5,0,5),false);assert.equal(enemyPerception(guard,-5,0,5,true),true);assert.equal(enemyPerception({...guard,awareness:.8},-5,0,5),true);assert.equal(enemyPerception(guard,-1,0,1),true);
+});
+
+test('run grade ignores accuracy when too few rounds were fired',()=>{
+  const roadWin={victory:true,accuracy:0,shots:3,health:80,totalTime:300,kills:12,medals:2};
+  assert.equal(gradeRun(roadWin),'S');
+  assert.equal(gradeRun({...roadWin,shots:MIN_GRADED_SHOTS}),'A');
+  assert.equal(gradeRun({...roadWin,shots:40,accuracy:60}),'S');
+  assert.equal(gradeRun({...roadWin,victory:false}),'D');
+  assert.equal(gradeRun({victory:true,totalTime:900}),'C');
 });

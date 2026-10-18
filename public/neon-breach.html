@@ -203,6 +203,23 @@
     #hitMarker::before, #hitMarker::after { content: ""; position: absolute; inset: 0; border: solid #fff; border-width: 2px 0 0 2px; }
     #hitMarker::after { transform: rotate(180deg); }
     #hitMarker.critical::before, #hitMarker.critical::after { border-color: var(--amber); }
+    /* Kill confirm: larger red X that lingers a beat longer than a normal hit. */
+    #hitMarker.kill::before, #hitMarker.kill::after { border-color: #ff3b5c; border-width: 3px 0 0 3px; filter: drop-shadow(0 0 4px rgba(255,59,92,.8)); }
+    #damageNumbers { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; }
+    .damage-number { position: absolute; left: 0; top: 0; transform: translate(-50%,-50%); color: #fff; font: 900 15px/1 ui-monospace, monospace; letter-spacing: .02em; text-shadow: 0 1px 0 #000, 0 0 6px rgba(0,0,0,.8); white-space: nowrap; animation: damage-rise .7s ease-out forwards; }
+    .damage-number.critical { color: var(--amber); font-size: 18px; }
+    .damage-number.kill { color: #ff3b5c; font-size: 19px; }
+    @keyframes damage-rise { 0% { opacity: 0; transform: translate(-50%,-30%) scale(.7); } 15% { opacity: 1; transform: translate(-50%,-60%) scale(1.12); } 100% { opacity: 0; transform: translate(-50%,-260%) scale(.92); } }
+    #killFeed { position: absolute; right: 18px; top: 172px; margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; justify-items: end; pointer-events: none; max-width: min(320px, 46vw); }
+    #killFeed li { padding: 5px 9px; background: rgba(4,10,15,.72); border-right: 2px solid var(--cyan); color: var(--ink); font: 800 11px/1.2 ui-monospace, monospace; letter-spacing: .06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; animation: feed-in .22s ease-out both; transition: opacity .4s; }
+    #killFeed li.headshot { border-right-color: var(--amber); }
+    #killFeed li.elite, #killFeed li.commander { border-right-color: #ff3b5c; }
+    #killFeed li b { color: var(--cyan); font-weight: 900; }
+    #killFeed li.headshot b { color: var(--amber); }
+    #killFeed li.fading { opacity: 0; }
+    @keyframes feed-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+    @media (max-width: 700px) { #killFeed { top: 132px; right: 10px; } #killFeed li { font-size: 10px; padding: 4px 7px; } }
+    @media (prefers-reduced-motion: reduce) { .damage-number, #killFeed li { animation-duration: .01s; } }
 
     #announcement { position: absolute; top: 21%; left: 50%; max-width:70vw; transform: translateX(-50%); text-align: center; opacity: 0; transition: opacity .24s, transform .24s; }
     #announcement.show { opacity: 1; transform: translateX(-50%) translateY(-5px); }
@@ -885,6 +902,8 @@
     <button id="vehicleButton" hidden aria-label="Enter or exit the nearby vehicle">Enter vehicle</button>
     <div id="supplyHint" hidden></div>
     <div id="hitMarker"></div>
+    <div id="damageNumbers" aria-hidden="true"></div>
+    <ol id="killFeed" aria-live="polite" aria-label="Recent eliminations"></ol>
     <div id="announcement"><strong>BREACH 01</strong><span>HOSTILE SIGNAL ACQUIRED</span></div>
     <div id="missionComms"><b>COMMAND</b><span>Stand by.</span></div>
     <div id="objectiveDistance">00M</div>
@@ -1187,7 +1206,7 @@
       <h2 id="modalTitle">PAUSED</h2>
       <p id="modalText">Take a breath. Resume when ready.</p>
       <details id="pausedMission" class="quiet-options" hidden><summary>Current objective &amp; tactical plan</summary><p id="pausedObjective"></p><p id="pausedTactic"></p></details>
-      <details class="quiet-options" id="campaignViewOptions"><summary>Lighting &amp; camera</summary><label for="campaignTime">Time of day</label><select id="campaignTime"><option value="day">Day</option><option value="night">Night</option></select><button id="pausedNvg" class="secondary">Toggle night vision · B / Share</button><button id="pausedView" class="secondary">Switch view · V / Touchpad</button><p>Night vision is separate from night lighting. Civilians are not combat targets. Find the District Armory near the cyan square on your map.</p></details>
+      <details class="quiet-options" id="campaignViewOptions"><summary>Lighting &amp; camera</summary><label for="campaignTime">Time of day</label><select id="campaignTime"><option value="day">Day</option><option value="night">Night</option></select><button id="pausedNvg" class="secondary">Toggle night vision · B / Share</button><p>Night vision is separate from night lighting. Civilians are not combat targets. Find the District Armory near the cyan square on your map.</p></details>
       <section id="gunShopPanel" hidden aria-label="Gun store"><p id="shopBalance"></p><div id="shopWeapons" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px"></div><p id="shopStatus" role="status"></p></section>
       <div id="resultRank"></div>
       <div id="resultGrid" class="result-grid hidden">
@@ -1276,11 +1295,11 @@
     <button id="pauseButton" class="touch-btn" aria-label="Pause game">Ⅱ</button>
     <button id="touchMoreButton" class="touch-btn" aria-label="More gameplay actions" aria-controls="touchExtras" aria-expanded="false">MORE</button>
     <div id="touchExtras" hidden>
-    <button id="viewButton" class="touch-btn" aria-label="Switch first and third person view">VIEW 1P</button>
     <button id="nightVisionButton" class="touch-btn" aria-label="Toggle night vision" aria-pressed="false">NVG OFF</button>
     <button id="weaponButton" class="touch-btn" aria-label="Switch to next unlocked weapon">GUN</button>
     <button id="meleeButton" class="touch-btn" aria-label="Melee takedown">MELEE</button>
     <button id="sprintButton" class="touch-btn" aria-label="Hold to sprint">RUN</button>
+    <button id="crouchButton" class="touch-btn" aria-label="Toggle crouch; press while running to slide" aria-pressed="false">CROUCH</button>
     <button id="screenModeButton" class="touch-btn" aria-label="Try landscape fullscreen">SCREEN</button>
     <button id="lockButton" class="touch-btn active" aria-label="Toggle auto lock" aria-pressed="true">LOCK<br>ON</button>
     </div>

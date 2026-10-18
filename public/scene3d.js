@@ -444,20 +444,22 @@ function syncCorpses(frame) {
     let object = corpseMeshes.get(corpse);
     if (!object) {
       object = createHuman(corpse.type, corpse.variant || 0, corpse.elite, corpse.commander);
-      const rig = object.userData.rig;
-      rig.body.rotation.x = Math.PI / 2;
-      rig.body.position.y = .12;
-      rig.leftArm.rotation.z = -.8;
-      rig.rightArm.rotation.z = .65;
-      rig.leftLeg.rotation.x = -.24;
-      rig.rightLeg.rotation.x = .32;
       corpseMeshes.set(corpse, object);
       actorRoot.add(object);
       rendered.corpses.add(object);
     }
     current.add(object);
     object.position.set(corpse.x, Math.max(.035, (corpse.z || .5) - .5 + .035), corpse.y);
-    object.rotation.y = -(corpse.dir || 0) - Math.PI / 2;
+    // Death fall: ease from standing to the lying pose over ~0.4s, toppling away from the shot.
+    const fallT = Math.min(1, (corpse.age || 0) / .42), fallEase = 1 - Math.pow(1 - fallT, 3);
+    object.rotation.y = -(corpse.fall ?? corpse.dir ?? 0) - Math.PI / 2;
+    const rig = object.userData.rig;
+    rig.body.rotation.set(Math.PI / 2 * fallEase, 0, 0);
+    rig.body.position.y = .12 * fallEase;
+    rig.leftArm.rotation.z = -.8 * fallEase;
+    rig.rightArm.rotation.z = .65 * fallEase;
+    rig.leftLeg.rotation.x = -.24 * fallEase;
+    rig.rightLeg.rotation.x = .32 * fallEase;
     // Soft dissolve in the last second of corpse life.
     const fade = corpse.fade == null ? 1 : corpse.fade;
     object.visible = fade > .02;
@@ -565,6 +567,31 @@ function syncPickups(frame) {
   prune(rendered.pickups, current);
 }
 
+// Player tracers: a fixed pool of additive streaks, reused every frame (no per-shot allocation).
+const tracerGeometry = new THREE.BoxGeometry(.018, .018, 1);
+const tracerMaterial = new THREE.MeshBasicMaterial({ color: 0xfff1b8, transparent: true, opacity: .9, blending: THREE.AdditiveBlending, depthWrite: false });
+const tracerPool = [];
+const tracerStart = new THREE.Vector3(), tracerEnd = new THREE.Vector3();
+function syncTracers(frame) {
+  const tracers = frame.tracers || [];
+  for (let i = 0; i < Math.max(tracers.length, tracerPool.length); i++) {
+    const tracer = tracers[i];
+    let streak = tracerPool[i];
+    if (!tracer) { if (streak) streak.visible = false; continue; }
+    if (!streak) { streak = new THREE.Mesh(tracerGeometry, tracerMaterial.clone()); streak.frustumCulled = false; tracerPool.push(streak); effectsRoot.add(streak); }
+    // Draw the leading 70% of the path so the streak reads as moving, not as a laser.
+    const t = 1 - Math.max(0, tracer.life) / (tracer.max || .07);
+    tracerStart.set(tracer.x, tracer.z, tracer.y).lerp(tracerEnd.set(tracer.ex, tracer.ez, tracer.ey), Math.min(.6, t * .6));
+    tracerEnd.set(tracer.ex, tracer.ez, tracer.ey);
+    const length = tracerStart.distanceTo(tracerEnd);
+    streak.visible = length > .05 && frame.mode === 'playing';
+    streak.position.copy(tracerStart).lerp(tracerEnd, .5);
+    streak.scale.set(1, 1, length);
+    streak.lookAt(tracerEnd);
+    streak.material.opacity = .9 * (1 - t * .7);
+  }
+}
+
 function syncParticles(frame) {
   const current = frameSets.particles; current.clear();
   for (const particle of frame.particles) {
@@ -578,7 +605,7 @@ function syncParticles(frame) {
         particleMaterials.set(particle.color, material);
       }
       object = mesh(particleGeometry, material, false, false);
-      object.scale.setScalar(particle.color === '#6f0711' ? 1.25 : 1);
+      object.scale.setScalar(particle.size ?? (particle.color === '#6f0711' ? 1.25 : 1));
       particleMeshes.set(particle, object); effectsRoot.add(object); rendered.particles.add(object);
     }
     current.add(object);
@@ -765,6 +792,7 @@ function animate() {
   syncProjectiles(frame);
   syncPickups(frame);
   syncParticles(frame);
+  syncTracers(frame);
   const target=frame.objectiveTarget||[12,12],markerBase=(frame.missionStage===1||frame.missionStage===2) ? .88 : .08;objectiveMarker.visible=frame.mode==='playing'&&frame.wavePhase!=='complete'&&!frame.finisherCam?.active;objectiveMarker.position.set(target[0],markerBase+Math.sin(frame.totalTime*3.2)*.045,target[1]);objectiveMarker.rotation.y=frame.totalTime*1.3;markerRing.scale.setScalar(1+Math.sin(frame.totalTime*4)*.12);markerDiamond.rotation.y=frame.totalTime*2.2;
   terminal.visible=frame.mode==='playing'&&(frame.missionStage===1||frame.missionStage===2);if(terminal.visible)terminal.position.set(target[0],frame.missionStage===1?.72:0,target[1]);
   terminalScreen.material.emissiveIntensity=2.4+Math.sin(frame.totalTime*4)*.8;extractionPad.visible=frame.missionStage>=4;extractionPad.rotation.y=frame.totalTime*.18;extractionBeam.material.opacity=.065+Math.sin(frame.totalTime*2.4)*.025;

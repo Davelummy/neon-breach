@@ -244,6 +244,30 @@ try {
   await new Promise(resolve => setTimeout(resolve, 500));
   const airborne = await page.evaluate(() => window.__NEON_QA__.snapshot());
   check('jet flight gains altitude', airborne.z > 0.6, `z=${airborne.z.toFixed(2)}`);
+  await page.evaluate(() => window.__NEON_QA__.setFlight(false));
+
+  // Combat feedback: a confirmed kill shows a kill marker, a damage number, a feed entry and a tracer.
+  await page.evaluate(() => window.__NEON_QA__.setInvulnerable(true));
+  const feedback = await page.evaluate(() => window.__NEON_QA__.combatFeedbackTest());
+  check('kill shows marker, damage number, kill feed and tracer', feedback.dead && feedback.killMarker && feedback.numbers === 1 && feedback.feed.length === 1 && /WRAITH/.test(feedback.feed[0]) && feedback.tracers >= 1 && feedback.corpseFall, JSON.stringify(feedback));
+
+  // Stance: sprint then crouch starts a slide; afterwards the crouch toggle holds until pressed again.
+  // Sprint down the clear lane the feedback test just aimed along (grounded first).
+  await page.evaluate(() => { const s = window.__NEON_QA__; s.setAim(false); s.teleport(); });
+  await waitForState(page, () => window.__NEON_QA__.snapshot().grounded, 3000).catch(() => {});
+  await page.keyboard.down('KeyQ'); await page.keyboard.down('KeyW');
+  await waitForState(page, () => window.__NEON_QA__.snapshot().speed > 3.4, 5000).catch(() => {});
+  await page.keyboard.press('KeyC');
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const slide = await page.evaluate(() => window.__NEON_QA__.snapshot());
+  await page.keyboard.up('KeyW'); await page.keyboard.up('KeyQ');
+  check('crouching from a sprint starts a slide', slide.sliding && slide.crouch > .3, `speed=${slide.speed?.toFixed(2)} crouch=${slide.crouch?.toFixed(2)}`);
+  await new Promise(resolve => setTimeout(resolve, 900));
+  const crouched = await page.evaluate(() => window.__NEON_QA__.snapshot());
+  check('crouch persists after the slide ends', !crouched.sliding && crouched.crouch > .8, `crouch=${crouched.crouch?.toFixed(2)}`);
+  await page.keyboard.press('KeyC');
+  await waitForState(page, () => window.__NEON_QA__.snapshot().crouch < .1, 3000).catch(() => {});
+  check('pressing crouch again stands up', await page.evaluate(() => window.__NEON_QA__.snapshot().crouch < .1));
 
   // Genuine 3D layer: WebGL2 must initialize, submit real Three.js frames,
   // and hide the legacy Canvas layer. Compatibility mode is tested separately.
@@ -301,7 +325,8 @@ try {
   await waitForState(page,()=>document.body.classList.contains('three-ready')&&window.__NEON_RENDER_STATS__?.().calls>0);check('campaign night selection runs genuine 3D gameplay',op2.timeOfDay==='night');if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-night.png')});
   check('night lighting never automatically enables night vision',await page.evaluate(()=>!document.body.classList.contains('nvg-active')&&!window.__NEON_3D__.frame().nightVision));
   await page.keyboard.press('KeyB');await waitForState(page,()=>document.body.classList.contains('nvg-active'));await page.keyboard.press('KeyB');await waitForState(page,()=>!document.body.classList.contains('nvg-active'));check('night vision is an explicit reversible control',true);
-  await page.keyboard.press('KeyV');await waitForState(page,()=>window.__NEON_RENDER_STATS__().localPlayerVisible);check('third person submits a visible player model',true);if(process.env.SMOKE_SHOT)await page.screenshot({path:process.env.SMOKE_SHOT.replace(/\.png$/,'-third-person.png')});await page.keyboard.press('KeyV');await waitForState(page,()=>!window.__NEON_RENDER_STATS__().localPlayerVisible);
+  // First person only: V no longer switches to a third-person body.
+  await page.keyboard.press('KeyV');await new Promise(resolve=>setTimeout(resolve,300));check('view stays first person with no visible own body',await page.evaluate(()=>window.__NEON_3D__.frame().viewMode==='first'&&!window.__NEON_RENDER_STATS__().localPlayerVisible&&!document.getElementById('viewButton')));
   await page.keyboard.press('Escape');await page.select('#campaignTime','day');await page.keyboard.press('Escape');await waitForState(page,()=>window.__NEON_QA__.snapshot().mode==='playing'&&window.__NEON_QA__.snapshot().timeOfDay==='day');check('Night Raptor campaign can switch to daylight without restarting',true);
   // Simulation resumes before the next Three.js frame updates scene visibility.
   await waitForState(page,()=>window.__NEON_RENDER_STATS__().civilianCount>=6&&window.__NEON_RENDER_STATS__().shopVisible);

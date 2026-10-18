@@ -49,3 +49,12 @@ export function encounterExtras(entries){
     const [,x,y]=entries[n%entries.length];added.push([n%2?'specter':'wraith',x+(n%2?-4:4),y+(n===2?4:-3)]);
   }return added;
 }
+// Run grade. Accuracy only counts once enough rounds were fired: a run won mostly through vehicle
+// takedowns or finishers fires few shots and must not be graded down for 0% accuracy.
+export const MIN_GRADED_SHOTS=12;
+export function gradeRun({victory,accuracy=0,shots=0,health=0,totalTime=0,kills=0,medals=0}){
+  if(!victory)return 'D';
+  const aim=shots<MIN_GRADED_SHOTS?1:accuracy>=55?2:accuracy>=38?1:0;
+  const points=aim+(health>=65?2:health>=30?1:0)+(totalTime<480?2:totalTime<720?1:0)+(kills>=16?2:kills>=10?1:0)+Math.min(2,medals);
+  return points>=8?'S':points>=6?'A':points>=3?'B':'C';
+}

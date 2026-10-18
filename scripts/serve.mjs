@@ -26,7 +26,9 @@ const root = join(
       : existsSync('dist/index.html') ? 'dist' : 'public'
 );
 const port = Number(process.env.PORT || 4173);
-const devCacheStamp = Date.now().toString(36);
+const DEV_SW_KILL_SWITCH = `self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.map(key => caches.delete(key)))).then(() => self.registration.unregister()).then(() => self.clients.matchAll({ type: 'window' })).then(clients => clients.forEach(client => client.navigate(client.url)))));
+`;
 // Bind all interfaces by default so family/friends on LAN can join.
 const host = process.env.HOST || '0.0.0.0';
 
@@ -249,8 +251,10 @@ const server=createServer(async (request, response) => {
     const safePath = resolved && existsSync(resolved) ? resolved : join(root, fallback);
     response.setHeader('Content-Type', types[extname(safePath)] || 'application/octet-stream');
     response.setHeader('Cache-Control', 'no-cache');
-    // Unbuilt sw.js still has the placeholder; give each dev run its own cache so stale entries are purged.
-    if (pathname === '/sw.js' && root.endsWith('public')) return response.end(readFileSync(safePath, 'utf8').replaceAll('__BUILD_HASH__', `dev-${devCacheStamp}`));
+    // Live-source dev must never run the offline cache: it kept serving stale code after edits.
+    // Serve a self-removing worker that clears caches, unregisters and reloads open tabs.
+    // `npm start` (dist) and production still get the real service worker.
+    if (pathname === '/sw.js' && root.endsWith('public')) return response.end(DEV_SW_KILL_SWITCH);
     createReadStream(safePath).pipe(response);
   } catch (error) {
     json(response, 500, { error: error instanceof Error ? error.message : 'Server error' });
