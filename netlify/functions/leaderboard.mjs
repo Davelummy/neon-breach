@@ -140,7 +140,7 @@ async function handleLeaderboard(req) {
       });
     }
 
-    try{const accounts=createAccountService(getStore({name:'neon-breach-community',consistency:'strong'})),identity=await accounts.scoreIdentity(req,body.callsign);if(!identity.allowed)return Response.json({error:'Sign in to use this reserved username.'},{status:403,headers:corsHeaders});body.callsign=identity.callsign;}catch{return Response.json({error:'Account validation unavailable.'},{status:503,headers:corsHeaders});}
+    try{const accounts=createAccountService(getStore({name:'neon-breach-community',consistency:'strong'})),identity=await accounts.scoreIdentity(req,body.callsign);if(!identity.allowed)return Response.json({error:'Sign in to post scores.'},{status:403,headers:corsHeaders});body.callsign=identity.callsign;}catch{return Response.json({error:'Account validation unavailable.'},{status:503,headers:corsHeaders});}
     const validated = validateScoreEntry(body);
     if (!validated.ok) {
       return new Response(JSON.stringify({ error: validated.error }), {

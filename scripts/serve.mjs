@@ -26,6 +26,7 @@ const root = join(
       : existsSync('dist/index.html') ? 'dist' : 'public'
 );
 const port = Number(process.env.PORT || 4173);
+const devCacheStamp = Date.now().toString(36);
 // Bind all interfaces by default so family/friends on LAN can join.
 const host = process.env.HOST || '0.0.0.0';
 
@@ -133,7 +134,7 @@ async function handleLeaderboard(request, response, url) {
       return json(response, 400, { error: 'Invalid JSON body.' });
     }
     const identity=await accounts.scoreIdentity(new Request(new URL(request.url,`http://${request.headers.host}`),{headers:request.headers}),body.callsign);
-    if(!identity.allowed)return json(response,403,{error:'Sign in to use this reserved username.'});
+    if(!identity.allowed)return json(response,403,{error:'Sign in to post scores.'});
     body.callsign=identity.callsign;
     const validated = validateScoreEntry(body);
     if (!validated.ok) return json(response, 400, { error: validated.error });
@@ -248,6 +249,8 @@ const server=createServer(async (request, response) => {
     const safePath = resolved && existsSync(resolved) ? resolved : join(root, fallback);
     response.setHeader('Content-Type', types[extname(safePath)] || 'application/octet-stream');
     response.setHeader('Cache-Control', 'no-cache');
+    // Unbuilt sw.js still has the placeholder; give each dev run its own cache so stale entries are purged.
+    if (pathname === '/sw.js' && root.endsWith('public')) return response.end(readFileSync(safePath, 'utf8').replaceAll('__BUILD_HASH__', `dev-${devCacheStamp}`));
     createReadStream(safePath).pipe(response);
   } catch (error) {
     json(response, 500, { error: error instanceof Error ? error.message : 'Server error' });

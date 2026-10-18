@@ -70,7 +70,7 @@ export function createCommunityService(store, clock = Date.now, {scoreIdentity=n
         if (request.method !== 'POST') return json({ error: 'Method not allowed.' }, 405);
         const body = await request.json();
         if (!validPublicId(body?.run_id)) return json({ error: 'Invalid result identifier.' }, 400);
-        if(scoreIdentity){const identity=await scoreIdentity(request,body.callsign);if(!identity.allowed)return json({error:'Sign in to use this reserved username.'},403);body.callsign=identity.callsign;}
+        if(scoreIdentity){const identity=await scoreIdentity(request,body.callsign);if(!identity.allowed)return json({error:'Sign in to post scores.'},403);body.callsign=identity.callsign;}
         const validated = validateScoreEntry(body);
         if (!validated.ok) return json({ error: validated.error }, 400);
         // Only public score fields, never transfer codes, player IDs or party codes.

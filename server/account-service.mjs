@@ -112,10 +112,11 @@ export function createAccountService(store,{clock=Date.now,sendVerification=null
       return json({error:'Not found.'},404);
     }catch{return json({error:'Account service unavailable.'},503);}
   };
-  async function scoreIdentity(request,callsign){
-    const auth=await identify(request);if(auth)return {allowed:true,callsign:auth.user.username.toUpperCase()};
-    const name=normalizeUsername(callsign),reserved=name&&await store.get(`account:${name}`,{type:'json'});
-    return {allowed:!reserved,callsign};
+  // Public scores are account-only: guests keep runs on their device, and the
+  // posted callsign is always the signed-in username, never the request body's.
+  async function scoreIdentity(request){
+    const auth=await identify(request);
+    return auth?{allowed:true,callsign:auth.user.username.toUpperCase()}:{allowed:false};
   }
   return {handle,identify,scoreIdentity};
 }

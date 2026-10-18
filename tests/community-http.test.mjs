@@ -20,7 +20,8 @@ test('local community APIs persist records and filter real HTTP boards', async (
     assert.match(response.headers.get('content-type'), /application\/json/);
     return { response, data: await response.json() };
   };
-  const post = (path, body) => fetch(origin + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
+  let cookie = '';
+  const post = (path, body) => fetch(origin + path, { method: 'POST', headers: { 'content-type': 'application/json', origin, ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
   try {
     await ready;
     const player = randomUUID();
@@ -31,6 +32,12 @@ test('local community APIs persist records and filter real HTTP boards', async (
     const run = randomUUID(); const callsign = `QA${run.slice(0, 8)}`.toUpperCase();
     const party = `QA${run.slice(0, 8)}`.toUpperCase();
     const entry = { callsign, party, score: 1600, kills: 4, elapsed_seconds: 60, difficulty: 'operative' };
+    // Public scores are account-only: anonymous posts are refused before validation.
+    assert.equal((await post('/api/results', { ...entry, run_id: randomUUID() })).status, 403);
+    assert.equal((await post('/api/leaderboard', entry)).status, 403);
+    const signup = await post('/api/auth/signup', { username: callsign.toLowerCase(), password: `test-${run}` });
+    assert.equal(signup.status, 200);
+    cookie = signup.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
     assert.equal((await post('/api/results', { ...entry, run_id: run })).status, 201);
     assert.equal((await post('/api/results', { ...entry, score: 1800, run_id: run })).status, 409);
     const { data: result } = await get(`/api/results?id=${run}`);
