@@ -48,7 +48,9 @@ export function arenaOperation(operation,arenaId){
   })};
 }
 let activeArenaId='city-gate';
-export function coverAt(x,y){return ARENA_COVERS[activeArenaId].find(c=>Math.abs(x-c.x)<=c.w/2&&Math.abs(y-c.y)<=c.d/2);}
+// Vehicles can ram light cover aside; knocked covers stop colliding until the next deployment.
+export function coverAt(x,y){return ARENA_COVERS[activeArenaId].find(c=>!c.knocked&&Math.abs(x-c.x)<=c.w/2&&Math.abs(y-c.y)<=c.d/2);}
+export function resetKnockedCovers(){for(const covers of Object.values(ARENA_COVERS))for(const cover of covers)delete cover.knocked;}
 export function supportHeight(x,y,brokenGlass=new Set()){
   const ix=Math.floor(x),iy=Math.floor(y),type=map[iy]?.[ix];
   const wall=ix>0&&iy>0&&ix<MAP_W-1&&iy<MAP_H-1&&type&&type!==4?WALL_HEIGHTS[type]:0;
@@ -217,7 +219,8 @@ function evaluateMedals(stats) {
 }
 
 const CAR_SPAWNS = [
-  {x:4.5,y:12.2,dir:0,color:'#23834b',kind:'taxi',name:'ABUJA TAXI'},
+  // x was 4.5: the rear overlapped a crate/planter/bench, so this taxi could never move.
+  {x:5.3,y:12.2,dir:0,color:'#23834b',kind:'taxi',name:'ABUJA TAXI'},
   {x:19.4,y:12.1,dir:Math.PI,color:'#23834b',kind:'taxi',name:'ABUJA TAXI'},
   {x:12.1,y:4.5,dir:Math.PI/2,color:'#23834b',kind:'taxi',name:'ABUJA TAXI'},
   {x:10.2,y:18.5,dir:0,color:'#ffd337',kind:'tricycle',name:'YELLOW KEKE'},

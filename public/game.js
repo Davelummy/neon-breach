@@ -4,7 +4,7 @@ import {accountUser,isGuest,initializeAccounts,showAccountGate} from './accounts
 import {drawCombatRadar,selectConnectedGamepad} from './combat-interface.js';
 import { MAP_W, MAP_H, GROUND_HEIGHT, WALL_HEIGHTS, DIFFICULTIES, ENEMY_TYPES, WEAPONS, PERKS,
   CAR_SPAWNS, WAVE_TABLE, MISSIONS, OPERATIONS, MISSION_CONDITIONS, spawns, map, STAIR_ZONES,
-  OP_RULES, MEDAL_DEFS, dailyModifier, evaluateMedals, applyOperationLayout, collectSupply, missionInstruction, missionTactic, ARENAS, WORLD_COVERS, ARENA_COVERS, coverAt, supportHeight, vehicleDistance, vehicleBounds, arenaOperation, DISTRICT_SPAWNS, separatedSpawn } from '/data.js';
+  OP_RULES, MEDAL_DEFS, dailyModifier, evaluateMedals, applyOperationLayout, collectSupply, missionInstruction, missionTactic, ARENAS, WORLD_COVERS, ARENA_COVERS, coverAt, resetKnockedCovers, supportHeight, vehicleDistance, vehicleBounds, arenaOperation, DISTRICT_SPAWNS, separatedSpawn } from '/data.js';
 import { AudioSystem } from '/audio.js';
 import { requestLandscape, initializeInterface } from '/mobile-controls.js';
 import {LIVE_STATIONS,VehicleRadio,discoverStations,cachedStations} from '/vehicle-radio.js';
@@ -315,7 +315,23 @@ let accountCheckPending=true;
     function blocksAt(x,y,z){const ix=Math.floor(x),iy=Math.floor(y);if(ix<=0||iy<=0||ix>=MAP_W-1||iy>=MAP_H-1)return true;const cover=coverAt(x,y);if(cover&&z-GROUND_HEIGHT<cover.height-.025)return true;const type=map[iy][ix];if(!solidCell(ix,iy))return false;return z-GROUND_HEIGHT<(WALL_HEIGHTS[type]||1)-.025;}
     function canMovePlayer(x,y,r=.24) { return !blocksAt(x-r,y-r,player.z)&&!blocksAt(x+r,y-r,player.z)&&!blocksAt(x-r,y+r,player.z)&&!blocksAt(x+r,y+r,player.z)&&(player.z>1.12||!carBlocked(x,y,r)); }
     function canMoveEnemy(e,x,y,r){return !blocksAt(x-r,y-r,e.z)&&!blocksAt(x+r,y-r,e.z)&&!blocksAt(x-r,y+r,e.z)&&!blocksAt(x+r,y+r,e.z)&&!carBlocked(x,y,r);}
-    function canMoveVehicle(x,y,index){const car=state.cars[index],{halfLength:length,halfWidth:width}=vehicleBounds(car),c=Math.cos(car.dir),s=Math.sin(car.dir);for(const a of [-length,0,length])for(const b of [-width,0,width]){const px=x+a*c-b*s,py=y+a*s+b*c;if(isWall(px,py)||coverAt(px,py)||carBlocked(px,py,.1,index))return false;}return !isWall(x,y);}
+    // Ramming: at driving speed, light cover (barriers, crates) in the vehicle's footprint is knocked aside
+    // instead of acting as a wall. Creeping into it still stops you, so cover stays useful on foot.
+    const RAM_SPEED=1.6;
+    function ramCovers(car,x,y){
+      if(Math.abs(car.speed)<RAM_SPEED)return;const {halfLength:length,halfWidth:width}=vehicleBounds(car),c=Math.cos(car.dir),s=Math.sin(car.dir);
+      for(const a of [-length,0,length])for(const b of [-width,0,width]){const cover=coverAt(x+a*c-b*s,y+a*s+b*c);if(cover)knockCover(cover,car);}
+    }
+    function knockCover(cover,car){
+      const sign=Math.sign(car.speed||1);cover.knocked={t:state.totalTime,dx:Math.cos(car.dir)*sign,dy:Math.sin(car.dir)*sign};
+      const heavy=cover.kind==='crate';car.speed*=heavy?.8:.9;damageVehicle(car,heavy?5:2.5);
+      state.screenShake=Math.max(state.screenShake,heavy?.45:.28);rumble(heavy?.5:.3,heavy?.7:.45,heavy?110:70);audio?.impact?.('metal');
+      for(let n=0;n<(heavy?14:9);n++)pushParticle({x:cover.x+(Math.random()-.5)*cover.w,y:cover.y+(Math.random()-.5)*cover.d,z:GROUND_HEIGHT+Math.random()*cover.height,vx:cover.knocked.dx*(1.5+Math.random()*2)+(Math.random()-.5)*1.6,vy:cover.knocked.dy*(1.5+Math.random()*2)+(Math.random()-.5)*1.6,vz:.8+Math.random()*1.8,gravity:6,life:.45+Math.random()*.35,max:.8,size:1.6,color:heavy?(n%2?'#28363a':'#55534e'):(n%3?'#c9c4b8':'#ffbb55')});
+    }
+    function vehicleBlockCount(x,y,index){const car=state.cars[index],{halfLength:length,halfWidth:width}=vehicleBounds(car),c=Math.cos(car.dir),s=Math.sin(car.dir);let count=0;for(const a of [-length,0,length])for(const b of [-width,0,width]){const px=x+a*c-b*s,py=y+a*s+b*c;if(isWall(px,py)||coverAt(px,py)||carBlocked(px,py,.1,index))count++;}return count;}
+    // A vehicle already overlapping something (bad spawn, knocked into cover) may still move as long as the move
+    // does not make the overlap worse, so it can always drive itself free.
+    function canMoveVehicle(x,y,index){if(isWall(x,y))return false;const blocked=vehicleBlockCount(x,y,index);if(!blocked)return true;const car=state.cars[index],here=vehicleBlockCount(car.x,car.y,index);return here>0&&blocked<=here&&(x!==car.x||y!==car.y);}
     function stairHeight(x,y){for(const stair of STAIR_ZONES)if(x>=stair.x1&&x<=stair.x2&&y>=stair.y1&&y<=stair.y2){let t=(y-stair.y1)/(stair.y2-stair.y1);if(stair.reverse)t=1-t;return GROUND_HEIGHT+t*.82;}return null;}
     function surfaceHeight(x,y) { const stair=stairHeight(x,y);if(stair!==null)return stair;return supportHeight(x,y,state.brokenGlass); }
     function normAngle(a) { while(a>Math.PI)a-=TAU; while(a<-Math.PI)a+=TAU; return a; }
@@ -973,7 +989,7 @@ let accountCheckPending=true;
       if(!saved&&rules.forceTime)setMissionTime(rules.forceTime,false);
       if(!saved&&state.daily?.rules?.forceNight)setMissionTime('night',false);
       if(saved){const id=saved.arena||'city-gate';state.arenaId=ARENAS.some(a=>a.id===id)?id:'city-gate';if($('arenaSelect'))$('arenaSelect').value=state.arenaId;}
-      applyOperationLayout(currentOp().id,state.arenaId);state.layoutVersion++;
+      applyOperationLayout(currentOp().id,state.arenaId);resetKnockedCovers();state.layoutVersion++;
       const city=createCityLife(state.arenaId,(x,y)=>canMove(x,y,.25)&&!coverAt(x,y),CAR_SPAWNS);state.civilians=city.civilians;state.gunShop=city.shop;
       state.nightVision=false;$('nightVisionButton').textContent='NVG OFF';$('nightVisionButton').setAttribute('aria-pressed','false');
       state.activeOperation=arenaOperation(OPERATIONS[state.operation],state.arenaId);
@@ -1464,12 +1480,15 @@ let accountCheckPending=true;
       if(sprinting)player.sprintLock=.16;
       if(player.carIndex>=0){
         const car=state.cars[player.carIndex],previousDir=car.dir,boosting=updateVehicleHandling(car,f,s,input.jump||input.gamepadJump,input.aim||input.gamepadAim,dt);
-        const previousX=car.x,previousY=car.y,nx=car.x+Math.cos(car.dir)*car.speed*dt,ny=car.y+Math.sin(car.dir)*car.speed*dt;if(canMoveVehicle(nx,ny,player.carIndex)){car.x=nx;car.y=ny;}
+        const previousX=car.x,previousY=car.y,nx=car.x+Math.cos(car.dir)*car.speed*dt,ny=car.y+Math.sin(car.dir)*car.speed*dt;ramCovers(car,nx,ny);if(canMoveVehicle(nx,ny,player.carIndex)){car.x=nx;car.y=ny;}
         // Glancing contact scrapes along the wall instead of stopping dead; a head-on hit bounces back so
         // the driver can steer away (vehicles cannot turn at zero speed, which used to wedge buses).
         else if(canMoveVehicle(nx,car.y,player.carIndex)){car.x=nx;car.speed*=.82;state.screenShake=Math.max(state.screenShake,.2);}
         else if(canMoveVehicle(car.x,ny,player.carIndex)){car.y=ny;car.speed*=.82;state.screenShake=Math.max(state.screenShake,.2);}
-        else{const impact=Math.abs(car.speed);car.dir=previousDir;car.speed=-Math.sign(car.speed||1)*Math.min(1.6,.6+impact*.22);state.screenShake=.65;rumble(.4,.6,85);if(impact>3.8)damageVehicle(car,impact*2.3);}
+        // Head-on: a real impact bounces back; gently pushing into a wall just stops, so the driver can pivot out.
+        else{const impact=Math.abs(car.speed);if(impact<1.2){const pushSign=Math.sign(car.speed||1);car.speed=0;if(!canMoveVehicle(car.x,car.y,player.carIndex)){
+          // A nose flush against the wall would swing a corner into it while pivoting: ease back a few cm first.
+          const bx=car.x-Math.cos(previousDir)*.09*pushSign,by=car.y-Math.sin(previousDir)*.09*pushSign;if(canMoveVehicle(bx,by,player.carIndex)){car.x=bx;car.y=by;}else car.dir=previousDir;}}else{car.dir=previousDir;car.speed=-Math.sign(car.speed)*Math.min(1.6,.6+impact*.22);state.screenShake=.65;rumble(.4,.6,85);}if(impact>3.8)damageVehicle(car,impact*2.3);}
         for(const enemy of state.enemies){const damage=vehicleImpactDamage(car,previousX,previousY,enemy);if(!damage)continue;enemy.vehicleHitCooldown=.65;enemy.hp-=damage;if(enemy.hp<=0){state.roadkills++;audio?.roadkill();killEnemy(enemy,false,'roadkill');player.score+=200;showMessage('VEHICLE TAKEDOWN // +200');rumble(.72,.9,130);}else{enemy.hitFlash=.18;enemy.dodgeTimer=.4;}car.speed*=.88;}
         car.engineTimer-=dt;if(car.engineTimer<=0&&Math.abs(car.speed)>.35){audio?.engine(car.speed,boosting);car.engineTimer=boosting?.1:.18;}
         player.x=car.x;player.y=car.y;player.dir=car.dir;player.z=.62;player.vz=0;player.grounded=true;player.jetting=false;player.wasJetting=false;audio?.jetThrust?.(false);player.jetFuel=Math.min(100,player.jetFuel+dt*18);
@@ -2703,6 +2722,16 @@ let accountCheckPending=true;
         teleport:(x=player.x,y=player.y)=>{player.x=Number(x);player.y=Number(y);player.z=surfaceHeight(player.x,player.y);player.vz=0;player.grounded=true;},
         skipWait:()=>{state.waveTimer=0;state.spawnTimer=0},
         setInvulnerable:(value=true)=>{state.qaInvulnerable=!!value;},
+        // Park the occupied vehicle with a clear run-up toward a cover; returns that cover's index.
+        ramSetup:()=>{
+          const car=state.cars[player.carIndex];if(!car)return -1;const covers=ARENA_COVERS[state.arenaId];
+          for(let i=0;i<covers.length;i++){const c=covers[i];if(c.knocked)continue;for(const dir of [0,Math.PI/2,Math.PI,-Math.PI/2]){const sx=c.x-Math.cos(dir)*3.4,sy=c.y-Math.sin(dir)*3.4,old={x:car.x,y:car.y,dir:car.dir};Object.assign(car,{x:sx,y:sy,dir});
+            let clear=true;for(let d=0;d<=2.2;d+=.2)if(!canMoveVehicle(sx+Math.cos(dir)*d,sy+Math.sin(dir)*d,player.carIndex)){clear=false;break;}
+            if(clear){car.speed=0;player.x=car.x;player.y=car.y;player.dir=dir;return i;}Object.assign(car,old);}}
+          return -1;
+        },
+        vehicleProbe:()=>{const index=player.carIndex,car=state.cars[index];if(!car)return null;const {halfLength:L,halfWidth:W}=vehicleBounds(car),c=Math.cos(car.dir),s=Math.sin(car.dir),hits=[];for(const a of [-L,0,L])for(const b of [-W,0,W]){const px=car.x+a*c-b*s,py=car.y+a*s+b*c;const why=isWall(px,py)?(coverAt(px,py)?'cover':'wall'):carBlocked(px,py,.1,index)?'car':null;if(why)hits.push(`${a>0?'front':a<0?'rear':'mid'}/${b>0?'L':b<0?'R':'C'}:${why}`);}return {x:+car.x.toFixed(2),y:+car.y.toFixed(2),dir:+car.dir.toFixed(2),speed:+car.speed.toFixed(2),fits:canMoveVehicle(car.x,car.y,index),hits};},
+        coverState:i=>({knocked:!!ARENA_COVERS[state.arenaId][i]?.knocked,count:ARENA_COVERS[state.arenaId].filter(c=>c.knocked).length}),
         combatFeedbackTest:()=>{
           state.enemies=[];state.projectiles=[];state.tracers=[];$('killFeed').replaceChildren();$('damageNumbers').replaceChildren();
           // Find a clear 5m lane from the player's current spot so the test works in every arena layout.

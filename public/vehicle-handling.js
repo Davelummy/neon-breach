@@ -11,6 +11,11 @@ export function updateVehicleHandling(car,throttle,steering,boost,brake,dt){
   if(Math.abs(car.speed)<.03&&Math.abs(throttle)<.08)car.speed=0;
   car.steer=(car.steer||0)+(steering-(car.steer||0))*(1-Math.exp(-dt*(brake?5:8)));
   const speed=Math.abs(car.speed),grip=1-Math.min(.42,speed/(top*2.5)),turn=(bus?.9:keke?2.1:1.65)*Math.min(1,speed/2.4)*grip;
-  if(speed>.08)car.dir+=car.steer*turn*dt*Math.sign(car.speed);car.dir=Math.atan2(Math.sin(car.dir),Math.cos(car.dir));
+  // Stuck-pivot: from (near) rest, steering while pressing throttle or reverse turns slowly on the spot so a
+  // vehicle nosed into a wall can get out. Decided on the pre-acceleration speed, because a blocked vehicle is
+  // reset to zero every frame. Idle steering of a parked vehicle still does nothing.
+  if(Math.abs(previous)<.08&&Math.abs(throttle)>.2&&Math.abs(steering)>.15)car.dir+=Math.sign(steering)*(bus?.5:keke?1.5:1)*dt*Math.sign(throttle);
+  else if(speed>.08)car.dir+=car.steer*turn*dt*Math.sign(car.speed);
+  car.dir=Math.atan2(Math.sin(car.dir),Math.cos(car.dir));
   car.boosting=boosting;car.braking=!!brake||reversing;return boosting;
 }

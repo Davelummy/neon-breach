@@ -34,6 +34,7 @@ scene.add(camera);
 const worldRoot = new THREE.Group();
 const actorRoot = new THREE.Group();
 const effectsRoot = new THREE.Group();
+const coverParts = [];
 scene.add(worldRoot, actorRoot, effectsRoot);
 
 const hemi = new THREE.HemisphereLight(0xe8f6ff, 0x2a3838, 1.85);
@@ -204,6 +205,7 @@ function buildWorld() {
       const item=mesh(new THREE.BoxGeometry(cover.w,cover.height,cover.d),color);
       item.position.set(cover.x,cover.height/2,cover.y);group.add(item);
       const stripe=mesh(new THREE.BoxGeometry(cover.w+.01,.065,cover.d+.01),cover.kind==='crate'?darkMetal:mat(0xffbb55,.8,.1),false,false);stripe.position.set(cover.x,cover.height*.65,cover.y);group.add(stripe);
+      for(const part of [item,stripe]){part.userData.cover=cover;part.userData.base=part.position.clone();coverParts.push(part);}
     }
   }
 }
@@ -592,6 +594,24 @@ function syncTracers(frame) {
   }
 }
 
+// Cover rammed by a vehicle tumbles away along the push direction, then disappears.
+function syncCovers(frame) {
+  const now = frame.totalTime || 0;
+  for (const part of coverParts) {
+    const knocked = part.userData.cover.knocked, base = part.userData.base;
+    if (!knocked || now < knocked.t) {
+      if (part.userData.wasKnocked) { part.position.copy(base); part.rotation.set(0, 0, 0); part.visible = true; part.userData.wasKnocked = false; }
+      continue;
+    }
+    part.userData.wasKnocked = true;
+    const age = now - knocked.t, t = Math.min(1, age / .7);
+    part.visible = age < 1.1;
+    if (!part.visible) continue;
+    part.position.set(base.x + knocked.dx * t * 1.8, base.y + Math.sin(t * Math.PI) * .45 - t * base.y * .6, base.z + knocked.dy * t * 1.8);
+    part.rotation.set(knocked.dy * t * 2.4, 0, -knocked.dx * t * 2.4);
+  }
+}
+
 function syncParticles(frame) {
   const current = frameSets.particles; current.clear();
   for (const particle of frame.particles) {
@@ -793,6 +813,7 @@ function animate() {
   syncPickups(frame);
   syncParticles(frame);
   syncTracers(frame);
+  syncCovers(frame);
   const target=frame.objectiveTarget||[12,12],markerBase=(frame.missionStage===1||frame.missionStage===2) ? .88 : .08;objectiveMarker.visible=frame.mode==='playing'&&frame.wavePhase!=='complete'&&!frame.finisherCam?.active;objectiveMarker.position.set(target[0],markerBase+Math.sin(frame.totalTime*3.2)*.045,target[1]);objectiveMarker.rotation.y=frame.totalTime*1.3;markerRing.scale.setScalar(1+Math.sin(frame.totalTime*4)*.12);markerDiamond.rotation.y=frame.totalTime*2.2;
   terminal.visible=frame.mode==='playing'&&(frame.missionStage===1||frame.missionStage===2);if(terminal.visible)terminal.position.set(target[0],frame.missionStage===1?.72:0,target[1]);
   terminalScreen.material.emissiveIntensity=2.4+Math.sin(frame.totalTime*4)*.8;extractionPad.visible=frame.missionStage>=4;extractionPad.rotation.y=frame.totalTime*.18;extractionBeam.material.opacity=.065+Math.sin(frame.totalTime*2.4)*.025;
