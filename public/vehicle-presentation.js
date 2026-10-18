@@ -2,9 +2,9 @@
 export function createVehicleFactory({THREE,mat,mesh,darkMetal,blackMetal,cheapGlass=false}) {
 return function createCar(color='#23834b',kind='taxi'){
  const root=new THREE.Group(),body=new THREE.Group();root.add(body);
- const paint=mat(kind==='tricycle'?0xf2bd26:new THREE.Color(color),.42,.24),white=mat(0xe8e9df,.48,.12),trim=darkMetal;
+ const paint=mat(kind==='tricycle'?0xf2bd26:new THREE.Color(color),.3,.28),white=mat(0xe8e9df,.38,.1),trim=darkMetal;
  const glass=cheapGlass?mat(0x244452,.24,.12):new THREE.MeshPhysicalMaterial({color:0x244452,roughness:.2,metalness:.12,clearcoat:1});
- const rim=mat(0x889293,.38,.6);
+ const rim=mat(0x889293,.26,.82);
  const head=new THREE.MeshStandardMaterial({color:0xe9efdb,emissive:0xe9efdb,emissiveIntensity:.35});
  const tail=new THREE.MeshStandardMaterial({color:0xa71c17,emissive:0xff2418,emissiveIntensity:.15});
  function box(w,h,d,m,x,y,z=0,parent=body){const o=mesh(new THREE.BoxGeometry(w,h,d),m);o.position.set(x,y,z);parent.add(o);return o;}

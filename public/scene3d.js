@@ -42,15 +42,102 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff0d0, 3.4);
 sun.position.set(8, 18, 4);
 sun.castShadow = true;
-sun.shadow.mapSize.set(lowPreset ? 256 : coarse ? 512 : 768, lowPreset ? 256 : coarse ? 512 : 768);
-sun.shadow.camera.left = -18;
-sun.shadow.camera.right = 18;
-sun.shadow.camera.top = 18;
-sun.shadow.camera.bottom = -18;
+sun.shadow.mapSize.set(512,512);
+sun.shadow.camera.left = -16;
+sun.shadow.camera.right = 16;
+sun.shadow.camera.top = 16;
+sun.shadow.camera.bottom = -16;
 sun.shadow.camera.near = 1;
-sun.shadow.camera.far = 50;
+sun.shadow.camera.far = 60;
 sun.shadow.bias = -.0008;
-scene.add(sun);
+sun.shadow.normalBias = .025;
+scene.add(sun,sun.target);
+
+// Keep the fixed light direction, but cover the district around the player.
+// Snap in the light's right/up axes, not world X/Z, to keep texels stationary.
+const sunOffset=new THREE.Vector3(8,18,4),shadowDepth=sunOffset.clone().normalize();
+const shadowRight=new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0),shadowDepth).normalize();
+const shadowUp=new THREE.Vector3().crossVectors(shadowDepth,shadowRight);
+const shadowFocus=new THREE.Vector3(),lastShadowCamera=new THREE.Vector3(Infinity,Infinity,Infinity);
+let shadowDirty=true,shadowUpdates=0,lastShadowTime=-Infinity;
+function updateSunShadow(frame){
+  if(fx.quality===0)return;
+  const now=frame.totalTime||0,moved=camera.position.distanceToSquared(lastShadowCamera)>2.25;
+  if(fx.quality===1&&!shadowDirty&&!moved&&now-lastShadowTime<.5)return;
+  shadowFocus.set(camera.position.x,0,camera.position.z);
+  const texel=32/sun.shadow.mapSize.x;
+  const right=shadowFocus.dot(shadowRight),up=shadowFocus.dot(shadowUp);
+  shadowFocus.addScaledVector(shadowRight,Math.round(right/texel)*texel-right);
+  shadowFocus.addScaledVector(shadowUp,Math.round(up/texel)*texel-up);
+  sun.target.position.copy(shadowFocus);sun.position.copy(shadowFocus).add(sunOffset);
+  sun.target.updateMatrixWorld();sun.updateMatrixWorld();
+  renderer.shadowMap.needsUpdate=true;sun.shadow.needsUpdate=true;
+  lastShadowCamera.copy(camera.position);lastShadowTime=now;shadowDirty=false;shadowUpdates++;
+}
+
+// A single untextured sky draw on every preset. The same linear-colour shader
+// is captured separately for reflections; it never samples the world itself.
+const skyPalettes={
+  day:{top:0x3779b2,horizon:0xc3d9da,bottom:0x57666c,disc:0xffedc8,haze:.22,hemi:1.22,lowHemi:1.85,environment:.55},
+  night:{top:0x040c1e,horizon:0x304555,bottom:0x101820,disc:0xb9d5ed,haze:.12,hemi:1.02,lowHemi:1.45,environment:.4},
+  nvg:{top:0x03160b,horizon:0x306346,bottom:0x0c2818,disc:0xb5ffd1,haze:.14,hemi:1.55,lowHemi:2.35,environment:.45}
+};
+const skyMaterial=new THREE.ShaderMaterial({
+  side:THREE.BackSide,depthWrite:false,depthTest:true,fog:false,
+  uniforms:{topColor:{value:new THREE.Color(skyPalettes.day.top)},horizonColor:{value:new THREE.Color(skyPalettes.day.horizon)},bottomColor:{value:new THREE.Color(skyPalettes.day.bottom)},discColor:{value:new THREE.Color(skyPalettes.day.disc)},sunDirection:{value:shadowDepth},haze:{value:.22}},
+  vertexShader:'varying vec3 skyDirection;void main(){skyDirection=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+  fragmentShader:`uniform vec3 topColor,horizonColor,bottomColor,discColor,sunDirection;uniform float haze;varying vec3 skyDirection;
+void main(){
+ vec3 direction=normalize(skyDirection);
+ float elevation=direction.y;
+ vec3 color=mix(horizonColor,topColor,pow(clamp(elevation,0.,1.),.55));
+ color=mix(color,bottomColor,1.-smoothstep(-.45,0.,elevation));
+ float toward=max(0.,dot(direction,sunDirection));
+ color+=discColor*(pow(toward,48.)*haze+smoothstep(.9996,.99985,toward)*1.8);
+ gl_FragColor=vec4(color,1.);
+ #include <tonemapping_fragment>
+ #include <colorspace_fragment>
+}`
+});
+const skyGeometry=new THREE.SphereGeometry(70,24,12),sky=new THREE.Mesh(skyGeometry,skyMaterial);
+sky.name='District gradient sky';sky.frustumCulled=false;sky.renderOrder=1000;scene.add(sky);
+const environmentScene=new THREE.Scene(),environmentSky=new THREE.Mesh(skyGeometry,skyMaterial);
+environmentSky.frustumCulled=false;environmentScene.add(environmentSky);
+const environmentMaps=new Map();let environmentGenerator=null,currentPalette='';
+function applyEnvironmentLighting(){
+  if(!currentPalette)return;
+  const palette=skyPalettes[currentPalette];
+  hemi.intensity=fx.quality===0?palette.lowHemi:palette.hemi;
+  scene.environmentIntensity=palette.environment;
+  if(fx.quality===0){scene.environment=null;return;}
+  if(!environmentMaps.has(currentPalette)){
+    environmentGenerator ||= new THREE.PMREMGenerator(renderer);
+    environmentMaps.set(currentPalette,environmentGenerator.fromScene(environmentScene,0,.1,80,{size:coarse?64:128}));
+  }
+  scene.environment=environmentMaps.get(currentPalette).texture;
+}
+
+// Low uses one pooled instanced draw instead of a shadow-map pass per light.
+const blobCanvas=document.createElement('canvas');blobCanvas.width=blobCanvas.height=32;
+const blobContext=blobCanvas.getContext('2d'),blobGradient=blobContext.createRadialGradient(16,16,2,16,16,16);
+blobGradient.addColorStop(0,'rgba(0,0,0,.55)');blobGradient.addColorStop(.5,'rgba(0,0,0,.3)');blobGradient.addColorStop(1,'rgba(0,0,0,0)');
+blobContext.fillStyle=blobGradient;blobContext.fillRect(0,0,32,32);
+const blobTexture=new THREE.CanvasTexture(blobCanvas);
+const contactShadows=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1),new THREE.MeshBasicMaterial({map:blobTexture,transparent:true,depthWrite:false,toneMapped:false}),96);
+contactShadows.instanceMatrix.setUsage(THREE.DynamicDrawUsage);contactShadows.frustumCulled=false;contactShadows.count=0;contactShadows.renderOrder=1;
+scene.add(contactShadows);const blobTransform=new THREE.Object3D();let blobCount=0;
+function placeContactShadow(x,z,width,depth,angle=0){
+  if(blobCount>=96)return;
+  blobTransform.position.set(x,.022,z);blobTransform.rotation.set(-Math.PI/2,0,-angle);blobTransform.scale.set(width,depth,1);blobTransform.updateMatrix();
+  contactShadows.setMatrixAt(blobCount++,blobTransform.matrix);
+}
+function syncContactShadows(frame){
+  contactShadows.visible=fx.quality===0&&frame.mode==='playing';if(!contactShadows.visible)return;
+  blobCount=0;
+  for(const enemy of frame.enemies)if(enemyMeshes.get(enemy)?.visible&&(enemy.z||.5)<1)placeContactShadow(enemy.x,enemy.y,.95,.7);
+  for(const car of frame.cars)if(carMeshes.get(car)?.visible)placeContactShadow(car.x,car.y,car.kind==='bus'?3.8:car.kind==='tricycle'?1.6:2.3,car.kind==='bus'?1.7:car.kind==='tricycle'?1.05:1.25,car.dir);
+  contactShadows.count=blobCount;contactShadows.instanceMatrix.needsUpdate=true;
+}
 
 const neonLights = [];
 for (const [x, z, color] of [[2, 12, 0x31f5db], [22, 12, 0xff536d], [12, 2, 0xa66cff], [12, 22, 0xffbb55], [12, 12, 0xa0d0e0]]) {
@@ -64,8 +151,8 @@ const fill = new THREE.AmbientLight(0x607880, .35);
 scene.add(fill);
 
 const mat = (color, roughness = .7, metalness = .15) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
-const darkMetal = mat(0x11191d, .48, .72);
-const blackMetal = mat(0x05080a, .38, .82);
+const darkMetal = mat(0x182127, .38, .7);
+const blackMetal = mat(0x0d1318, .48, .55);
 // Brighter, more readable surfaces — district was too dark in play.
 const concrete = mat(0xb4afa0, .92, .02);
 const violetWall = mat(0x8e9693, .9, .04);
@@ -251,18 +338,19 @@ const roadTransform=new THREE.Object3D();
 const roadColor=new THREE.Color();
 function updateRoads(){populateDistrictRoads({THREE,map:bridge.world.map,width:bridge.world.MAP_W,height:bridge.world.MAP_H,roadTiles,roadLines,roadTransform,roadColor});}
 const lowCullables = [];
-if (lowPreset) {
+{
   worldRoot.updateMatrixWorld(true);
   const worldPosition = new THREE.Vector3();
   worldRoot.traverse(object => {
     if (object.isMesh) lowCullables.push(cacheWorldCullRecord(object, worldPosition));
   });
 }
-let renderedLayout=-1;
+let renderedLayout=-1,worldCullingActive=false;
 function syncWorldLayout(frame){
   if(renderedLayout===frame.layoutVersion)return;renderedLayout=frame.layoutVersion;
+  shadowDirty=true;
   rebuildWalls();
-  if(lowPreset){lowCullables.length=0;worldRoot.updateMatrixWorld(true);const position=new THREE.Vector3();worldRoot.traverse(object=>{if(object.isMesh)lowCullables.push(cacheWorldCullRecord(object,position));});}
+  lowCullables.length=0;worldRoot.updateMatrixWorld(true);const position=new THREE.Vector3();worldRoot.traverse(object=>{if(object.isMesh)lowCullables.push(cacheWorldCullRecord(object,position));});
   for(const [id,group] of arenaLandmarks)group.visible=id===frame.arenaId;
   for(const [id,group] of arenaCoverGroups)group.visible=id===frame.arenaId;
   groundArena(frame.arenaId);
@@ -305,7 +393,7 @@ const awning=mesh(new THREE.BoxGeometry(2.4,.1,1),mat(0x405f54,.9,0));awning.pos
 function syncCity(frame){
   let visible=0;
   for(const c of frame.civilians||[]){let object=civilianModels.get(c.id);if(!object){object=new THREE.Group();const shirt=mesh(civilianBodyGeometry,civilianClothes[c.variant%4]),head=mesh(civilianHeadGeometry,civilianSkin);shirt.position.y=1;head.position.y=1.45;object.add(shirt,head);const limbs=[];for(const [x,y] of [[-.22,1],[.22,1],[-.09,.45],[.09,.45]]){const limb=mesh(civilianLimbGeometry,y===1?civilianSkin:civilianShoes);limb.position.set(x,y,0);object.add(limb);limbs.push(limb);}object.userData.limbs=limbs;civilianModels.set(c.id,object);actorRoot.add(object);}
-    object.visible=frame.mode==='playing'&&Math.hypot(c.x-frame.player.x,c.y-frame.player.y)<(lowPreset?18:30)&&(!lowPreset||visible++<6);if(!object.visible)continue;
+    object.visible=frame.mode==='playing'&&Math.hypot(c.x-frame.player.x,c.y-frame.player.y)<(fx.quality===0?18:30)&&(fx.quality!==0||visible++<6);if(!object.visible)continue;
     object.position.set(c.x,0,c.y);object.rotation.y=-c.dir-Math.PI/2;const walk=Math.hypot(c.vx,c.vy)>.1?Math.sin(frame.totalTime*(c.flee?10:5)+c.id)*.4:0;for(let i=0;i<4;i++)object.userData.limbs[i].rotation.x=walk*(i%2?1:-1);
   }
   for(const [id,object] of civilianModels)if(!(frame.civilians||[]).some(c=>c.id===id)){actorRoot.remove(object);civilianModels.delete(id);}
@@ -375,7 +463,7 @@ function syncEnemies(frame) {
     let object = enemyMeshes.get(enemy);
     if (!object) { object = createHuman(enemy.type, enemy.variant || 0, enemy.elite,enemy.commander); enemyMeshes.set(enemy, object); actorRoot.add(object); rendered.enemies.add(object); }
     current.add(object);
-    object.visible = !enemy.dead && enemy.spawn < .98 && (!lowPreset||Math.hypot(enemy.x-frame.camera.x,enemy.y-frame.camera.y)<24);
+    object.visible = !enemy.dead && enemy.spawn < .98 && (fx.quality!==0||Math.hypot(enemy.x-frame.camera.x,enemy.y-frame.camera.y)<24);
     object.position.set(enemy.x, Math.max(0, (enemy.z || .5) - .5), enemy.y);
     object.rotation.y = -(enemy.facing || 0) - Math.PI / 2;
     if(object.visible)animateHuman(object, enemy, frame.totalTime);
@@ -431,7 +519,7 @@ function syncCars(frame) {
     let object = carMeshes.get(car);
     if (!object) { object = createCar(car.color,car.kind); carMeshes.set(car, object); actorRoot.add(object); rendered.cars.add(object); }
     current.add(object);
-    object.visible = !lowPreset||car===frame.cars[frame.player.carIndex]||Math.hypot(car.x-frame.camera.x,car.y-frame.camera.y)<28;
+    object.visible = fx.quality!==0||car===frame.cars[frame.player.carIndex]||Math.hypot(car.x-frame.camera.x,car.y-frame.camera.y)<28;
     if(object.userData.wrecked!==!!car.destroyed){object.traverse(mesh=>{if(!mesh.isMesh)return;if(!mesh.userData.originalMaterial)mesh.userData.originalMaterial=mesh.material;mesh.material=car.destroyed?wreckMaterial:mesh.userData.originalMaterial;});object.userData.wrecked=!!car.destroyed;}
     object.position.set(car.x, 0, car.y);
     object.rotation.y = -car.dir;
@@ -641,6 +729,11 @@ function updateEnvironment(frame) {
   const envKey = `${frame.timeOfDay}|${nvg ? 'nvg' : 'std'}`;
   if (lastEnvKey === envKey) return;
   lastEnvKey = envKey;
+  currentPalette=nvg?'nvg':frame.timeOfDay==='day'?'day':'night';
+  const palette=skyPalettes[currentPalette],uniforms=skyMaterial.uniforms;
+  uniforms.topColor.value.setHex(palette.top);uniforms.horizonColor.value.setHex(palette.horizon);
+  uniforms.bottomColor.value.setHex(palette.bottom);uniforms.discColor.value.setHex(palette.disc);uniforms.haze.value=palette.haze;
+  shadowDirty=true;
   const day = frame.timeOfDay === 'day' && !nvg;
   if (nvg) {
     // Bright green phosphor NVG — midtones lifted so contacts stay readable.
@@ -649,7 +742,6 @@ function updateEnvironment(frame) {
     scene.fog.density = .0085;
     hemi.color.set(0xb8ffd0);
     hemi.groundColor.set(0x1a4028);
-    hemi.intensity = 2.35;
     sun.color.set(0x90ffb8);
     sun.intensity = 2.15;
     fill.color.set(0x60c888);
@@ -662,7 +754,6 @@ function updateEnvironment(frame) {
     scene.fog.density = .012;
     hemi.color.set(0xe8f6ff);
     hemi.groundColor.set(0x2a3838);
-    hemi.intensity = 1.85;
     sun.color.set(0xfff0d0);
     sun.intensity = 3.4;
     fill.color.set(0x607880);
@@ -676,7 +767,6 @@ function updateEnvironment(frame) {
     scene.fog.density = .014;
     hemi.color.set(0x9ab4c4);
     hemi.groundColor.set(0x121a22);
-    hemi.intensity = 1.45;
     sun.color.set(0xa0b8d0);
     sun.intensity = 1.55;
     fill.color.set(0x506878);
@@ -684,6 +774,7 @@ function updateEnvironment(frame) {
     neonLights.forEach(light => { light.intensity = 5.0; light.distance = 16; });
     renderer.toneMappingExposure = 1.42;
   }
+  applyEnvironmentLighting();
 }
 
 let lastCameraTime=performance.now(),lastCameraVehicle=-1;
@@ -779,12 +870,16 @@ function updateCamera(frame) {
 }
 
 function syncGlass(frame) {
-  if (lowPreset) return;
+  if (fx.quality===0) return;
   for (const [key, object] of glassMeshes) object.visible = !frame.brokenGlass.has(key);
 }
 
 function cullLowWorld(frame) {
-  if (!lowPreset) return;
+  if(fx.quality!==0){
+    if(worldCullingActive)for(const record of lowCullables)record.object.visible=!record.object.userData.layoutHidden&&(!record.glassKey||!frame.brokenGlass.has(record.glassKey));
+    worldCullingActive=false;return;
+  }
+  worldCullingActive=true;
   const x = frame.camera?.x ?? 12, y = frame.camera?.y ?? 12;
   for (const record of lowCullables) {
     record.object.visible = shouldRenderCullRecord(record, x, y, frame.brokenGlass);
@@ -801,12 +896,15 @@ function animate() {
   syncWorldLayout(frame);
   updateEnvironment(frame);
   updateCamera(frame);
+  sky.position.copy(camera.position);
+  updateSunShadow(frame);
   cullLowWorld(frame);
   syncGlass(frame);
   syncEnemies(frame);
   syncCity(frame);
   syncDestroyNodes(frame);
   syncCars(frame);
+  syncContactShadows(frame);
   syncCorpses(frame);
   syncBlood(frame);
   syncProjectiles(frame);
@@ -879,12 +977,15 @@ function postPass(material, target) {
   renderer.render(postScene, postQuad);
 }
 
+const worldRenderStats={calls:0,triangles:0};
+function recordWorldRender(){worldRenderStats.calls=renderer.info.render.calls;worldRenderStats.triangles=renderer.info.render.triangles;}
 function renderFrame() {
   // Same cost path for all ops — NVG no longer forces an extra full-screen pass.
-  if (fx.quality < 2) { renderer.render(scene, camera); return; }
+  if (fx.quality < 2) { renderer.render(scene, camera);recordWorldRender();return; }
   if (!sceneTarget) buildTargets();
   renderer.setRenderTarget(sceneTarget);
   renderer.render(scene, camera);
+  recordWorldRender();
   brightMat.uniforms.tex.value = sceneTarget.texture; postPass(brightMat, bloomA);
   blurMat.uniforms.tex.value = bloomA.texture; blurMat.uniforms.dir.value.set(1, 0); postPass(blurMat, bloomB);
   blurMat.uniforms.tex.value = bloomB.texture; blurMat.uniforms.dir.value.set(0, 1); postPass(blurMat, bloomA);
@@ -900,6 +1001,14 @@ function applyQuality() {
   renderer.shadowMap.enabled = fx.quality >= 1;
   renderer.shadowMap.autoUpdate = fx.quality >= 2;
   sun.castShadow = fx.quality >= 1;
+  const shadowSize=fx.quality===2&&!coarse?1024:512;
+  if(sun.shadow.mapSize.x!==shadowSize||fx.quality===0){
+    sun.shadow.map?.dispose();sun.shadow.map=null;
+    sun.shadow.mapPass?.dispose();sun.shadow.mapPass=null;
+    sun.shadow.mapSize.set(shadowSize,shadowSize);
+  }
+  shadowDirty=true;
+  applyEnvironmentLighting();
   for(const light of neonLights)light.visible=fx.quality>=1;
   terminalLight.visible=fx.quality>=1;muzzleLight.visible=fx.quality>=1;
   // Transmission renders an additional scene target; ordinary transparent
@@ -907,6 +1016,7 @@ function applyQuality() {
   const transmission=fx.quality===0?0:.55;
   if(glassMaterial.transmission!==transmission){glassMaterial.transmission=transmission;glassMaterial.needsUpdate=true;}
   if (fx.quality >= 2) buildTargets();
+  else{sceneTarget?.dispose();bloomA?.dispose();bloomB?.dispose();sceneTarget=bloomA=bloomB=null;}
 }
 
 function tuneQuality() {
@@ -919,7 +1029,8 @@ function tuneQuality() {
 
 window.__NEON_FX__ = { quality: () => fx.quality, frameMs: () => fx.ema, post: () => fx.quality >= 2,
   // Test/dev hook: pin a quality level (pass null to resume auto-scaling).
-  force: level => { fx.forced = level === null ? null : Math.max(0, Math.min(3, level | 0)); if (fx.forced !== null) { fx.quality = fx.forced; applyQuality(); } } };
+  force: level => { fx.forced = level === null ? null : Math.max(0, Math.min(2, level | 0)); if (fx.forced !== null) { fx.quality = fx.forced; applyQuality(); } } };
+window.__NEON_VISUAL__=()=>({culling:worldCullingActive,sky:sky.visible,palette:currentPalette,environment:!!scene.environment,environmentMaps:environmentMaps.size,realShadows:renderer.shadowMap.enabled,shadowSize:sun.shadow.mapSize.x,shadowTarget:sun.target.position.toArray(),shadowUpdates,contactShadows:contactShadows.visible,contactCount:contactShadows.count,worldCalls:worldRenderStats.calls,worldTriangles:worldRenderStats.triangles});
 window.__NEON_RENDER_STATS__ = () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, points: renderer.info.render.points, lines: renderer.info.render.lines, textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries,localPlayerVisible:localPlayerModel.visible,civilianCount:civilianModels.size,shopVisible:shopRoot.visible,wallCells:wallMeshes.size,wallBatches:[...wallBatches.values()].filter(o=>o.count>0).length });
 
 addEventListener('resize', () => {

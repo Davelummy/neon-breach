@@ -35,7 +35,7 @@ export class Match {
       if(distance-seen*12>score){score=distance-seen*12;best=[x,y];}
     }
     if(!best)return false;
-    Object.assign(player,{x:best[0],y:best[1],z:0,vz:0,moveVx:0,moveVy:0,carId:null,interactHeld:false,jumpHeld:false,jetFuel:100,jetting:false,hp:100,ammo:RULES.magazine,deadUntil:0,protectedUntil:this.time+RULES.protection,reloadUntil:0,nextShot:this.time,input:null,inputAt:this.time});
+    Object.assign(player,{x:best[0],y:best[1],z:0,vz:0,moveVx:0,moveVy:0,carId:null,interactHeld:false,pendingInteract:false,jumpHeld:false,jetFuel:100,jetting:false,hp:100,ammo:RULES.magazine,deadUntil:0,protectedUntil:this.time+RULES.protection,reloadUntil:0,nextShot:this.time,input:null,inputAt:this.time});
     player.angle=[12,24,36].some(l=>Math.abs(player.x-l)<1)?(player.y>24?-Math.PI/2:Math.PI/2):(player.x>24?Math.PI:0);player.pitch=0;return true;
   }
   join(uid,name){
@@ -45,7 +45,14 @@ export class Match {
     if(!this.spawn(player))throw Error('No safe spawn is available.');
     this.players.set(uid,player);return player;
   }
-  input(player,value){const input=validateInput(value,player.lastSeq);if(!input)return false;player.input=input;player.lastSeq=input.seq;player.inputAt=this.time;return true;}
+  input(player,value){
+    const input=validateInput(value,player.lastSeq);if(!input)return false;
+    // A tap is an edge, not a movement state: a later release packet must not
+    // overwrite it before the simulation tick. The queue is bounded to one.
+    if(input.interact&&!player.interactHeld)player.pendingInteract=true;
+    player.interactHeld=input.interact;
+    player.input=input;player.lastSeq=input.seq;player.inputAt=this.time;return true;
+  }
   releaseVehicle(player){const car=this.world.vehicles?.find(c=>c.driver===player.id);if(car){car.driver=null;car.speed=0;}player.carId=null;}
   leave(uid){const player=this.players.get(uid);if(player)this.releaseVehicle(player);this.players.delete(uid);}
   toggleVehicle(player){
@@ -86,7 +93,7 @@ export class Match {
       p.vehicleHitCooldown=Math.max(0,(p.vehicleHitCooldown||0)-RULES.tick);
       if(p.reloadUntil&&this.time>=p.reloadUntil){p.ammo=RULES.magazine;p.reloadUntil=0;}
       p.reload=Math.max(0,p.reloadUntil-this.time);
-      if(input?.interact&&!p.interactHeld)this.toggleVehicle(p);p.interactHeld=!!input?.interact;
+      if(p.pendingInteract){p.pendingInteract=false;if(input)this.toggleVehicle(p);}
       const car=this.world.vehicles.find(c=>c.id===p.carId&&c.driver===p.id&&!c.destroyed);
       if(car){const x=car.x,y=car.y;driveVehicle(car,input,this.world);Object.assign(p,{x:car.x,y:car.y,z:.62,vz:0,angle:car.dir,jetting:false});p.jetFuel=Math.min(100,p.jetFuel+RULES.tick*18);for(const target of this.players.values()){if(target===p||target.hp<=0||target.carId)continue;const damage=vehicleImpactDamage(car,x,y,target);if(damage){target.vehicleHitCooldown=.65;p.protectedUntil=0;this.damagePlayer(p,target,damage);car.speed*=.88;}}continue;}
       movePlayer(p,input,this.world);if(!input)continue;

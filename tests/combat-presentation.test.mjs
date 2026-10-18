@@ -21,6 +21,16 @@ test('shared road instances follow the collision map without mutating it',()=>{
   const world=arenaWorld('city-gate'),before=JSON.stringify(world),roadTiles=new THREE.InstancedMesh(new THREE.BoxGeometry(1,.012,1),mat(),2304),roadLines=new THREE.InstancedMesh(new THREE.BoxGeometry(.07,.012,.65),mat(),400);
   populateDistrictRoads({THREE,map:world.map,roadTiles,roadLines});assert.ok(roadTiles.count>100&&roadTiles.count<=2304);assert.ok(roadLines.count>0&&roadLines.count<=400);assert.equal(JSON.stringify(world),before);roadTiles.geometry.dispose();roadLines.geometry.dispose();roadTiles.material.dispose();roadLines.material.dispose();
 });
+test('tactical accents stay readable without adding per-character lights',()=>{
+  const factory=createCombatModels({THREE,mat,mesh,darkMetal,blackMetal,bodyMat:(_,color,r,m)=>mat(color,r,m),weaponTextures:{},enemyTypes:{specter:{body:'trooper'}}});
+  const actor=factory.createHuman('specter',0),weapon=factory.createWeaponModel('rifle',0x31f5db);
+  try{
+    let lights=0,accent=false,reflectiveReceiver=false;
+    actor.traverse(o=>{if(o.isLight)lights++;if(o.isMesh&&o.material.emissiveIntensity>=.6)accent=true;});
+    weapon.traverse(o=>{if(o.isMesh&&o.material.metalness>=.7&&o.material.roughness<=.4)reflectiveReceiver=true;});
+    assert.equal(lights,0);assert.ok(accent);assert.ok(reflectiveReceiver);
+  }finally{releasePrivateModel(actor,protectedMaterials);releasePrivateModel(weapon,protectedMaterials);}
+});
 test('both modes can construct the same three landmark silhouettes and skyline',()=>{
   const old=globalThis.document;globalThis.document={createElement:()=>({width:0,height:0,getContext:()=>({fillRect(){},strokeRect(){},fillText(){}})})};
   try{for(const arena of ARENAS){const group=createArenaLandmark(arena,{THREE,mat,mesh,darkMetal,wallMaterials:{5:mat(),6:mat(),7:mat(),8:mat()}});assert.equal(group.name,arena.name);assert.ok(group.children.length>5);group.traverse(o=>{if(o.isMesh&&o.material.map)o.material.map.dispose();});releasePrivateModel(group,protectedMaterials);}const skyline=createDistrictSkyline({THREE,mat,mesh});assert.equal(skyline.name,'Abuja-inspired skyline');assert.ok(skyline.children.some(o=>o.isInstancedMesh));releasePrivateModel(skyline,protectedMaterials);}finally{globalThis.document=old;}

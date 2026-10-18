@@ -66,11 +66,11 @@ function createHuman(type = 'specter', variant = 0, elite = false, commander = f
     heavy: [0x4d3a36, 0x3e444a, 0x523c38]
   };
   const skins = [0x8d5a42, 0xc48a62, 0xe0b08a];
-  const uniform = bodyMat(body3d, colors[body3d][variant % 3], .78, .22);
-  const armor = mat(0x0d1418, .38, .78);
+  const uniform = bodyMat(body3d, colors[body3d][variant % 3], .85, .04);
+  const armor = mat(0x182127, .52, .5);
   const skin = mat(skins[variant % 3], .86, .04);
   const accentColor=commander?0xffd166:spec.color?new THREE.Color(spec.color).getHex():0x31f5db;
-  const accent = new THREE.MeshStandardMaterial({ color:accentColor, emissive:accentColor, emissiveIntensity: commander?.55:elite?.4:.12, roughness: .72, metalness: .18 });
+  const accent = new THREE.MeshStandardMaterial({ color:accentColor, emissive:accentColor, emissiveIntensity: commander?1.2:elite?.9:.6, roughness: .48, metalness: .15 });
   const scale = body3d === 'heavy' ? 1.2 : body3d === 'scout' ? .92 : 1;
 
   // More human proportions: narrower waist, broader chest, layered armor plates.
@@ -318,8 +318,8 @@ function animateHuman(group, enemy, time) {
 function createWeaponModel(id, color) {
   const root = new THREE.Group();
   // Tactical dark receivers with a thin accent rail — reads more like real kit than neon plastic.
-  const paint = mat(0x1c2228, .42, .55);
-  const polymer = mat(0x12161a, .62, .22);
+  const paint = mat(0x252e35, .32, .72);
+  const polymer = mat(0x151a1e, .76, .04);
   const accent = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.1, metalness: .5, roughness: .35 });
   const isPistol = id === 'pistol', isShotgun = id === 'shotgun', isDmr = id === 'dmr';
   const bodyLen = isPistol ? .4 : id==='smg'?.52:id==='lmg'?.96:isShotgun ? .82 : isDmr ? .9 : .72;

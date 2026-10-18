@@ -64,6 +64,16 @@ test('vehicle driving is bounded, cannot teleport, blocks walls, and releases ow
   for(let seq=1;seq<=20;seq++){m.input(p,command(seq,{forward:1,x:999,carId:'forged',speed:999}));m.tick();assert.equal(p.x,car.x);assert.ok(Math.abs(car.speed)<=7.1);assert.ok(vehicleOpen(m.world,car));}assert.ok(car.x-x>3);assert.ok(car.x-x<7.1);
   car.dir=0;car.x=45;car.y=36;for(let n=0;n<40;n++){m.input(p,command(21+n,{forward:1}));m.tick();}assert.ok(car.x<47);assert.ok(vehicleOpen(m.world,car));m.leave('a');assert.equal(car.driver,null);assert.equal(car.speed,0);
 });
+test('interaction taps survive coalesced input packets and held buttons toggle only once',()=>{
+  const m=new Match(),p=m.join('tap','tap'),car=m.world.vehicles.find(c=>c.id==='vehicle-6');
+  Object.assign(p,{x:car.x,y:car.y+1.1,z:0});
+  m.input(p,command(1,{interact:true}));m.input(p,command(2,{interact:false}));m.tick();
+  assert.equal(p.carId,car.id,'press/release arriving before a tick must still enter');
+  m.input(p,command(3,{interact:true}));m.tick();assert.equal(p.carId,null);
+  m.input(p,command(4,{interact:true}));m.tick();assert.equal(p.carId,null,'holding must not re-enter');
+  m.input(p,command(5,{interact:false}));m.input(p,command(6,{interact:true}));m.input(p,command(7,{interact:false}));m.tick();
+  assert.equal(p.carId,car.id);assert.equal(m.input(p,command(6,{interact:true})),false);m.tick();assert.equal(p.carId,car.id);
+});
 
 test('sustained fire damages vehicle hulls gradually and vehicle impacts award server-owned eliminations',()=>{
   const m=new Match(),a=m.join('a','a'),b=m.join('b','b'),car=m.world.vehicles.find(c=>c.kind==='bus');m.time=3;Object.assign(a,{x:car.x-4,y:car.y,z:0,angle:0,pitch:0});m.fire(a);assert.ok(car.hp<car.maxHp&&car.hp>car.maxHp*.9);assert.equal(car.destroyed,false);
